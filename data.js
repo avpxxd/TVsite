@@ -53,7 +53,8 @@ function toCard(item, badge = '') {
 
 async function loadContent() {
   // Random page (2-8) so the home screen shows different content on every load
-  const p = Math.floor(Math.random() * 7) + 2;
+  const p  = Math.floor(Math.random() * 7) + 2;
+  const fp = Math.floor(Math.random() * 4) + 1; // free/upcoming have fewer pages
 
   const [
     trendingMovies,
