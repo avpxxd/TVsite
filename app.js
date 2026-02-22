@@ -6,7 +6,7 @@
   const state = {
     activeTab: 'home',       // current tab
     focusZone: 'nav',        // 'nav' | 'banner' | 'content'
-    navIndex: 1,             // 0=Search,1=Home,2=Live,3=Shop,4=Discover,5=Apps
+    navIndex: 1,             // 0=Search,1=Home,2=Movies,3=Shows,4=Shop,5=Apps
     bannerCol: 0,            // 0=Play, 1=More Info
     rowIndex: 0,             // current row in content
     colIndex: 0,             // current col in row
@@ -14,10 +14,12 @@
     overlayItem: null,
     overlaySection: 'actions', // 'trailer' | 'actions' | 'providers'
     overlayCol: 0,
+    settingsPanelOpen: false,
+    settings: { region: 'US', providers: [] },
   };
 
   // Nav tabs order
-  const NAV_TABS = ['search', 'home', 'live', 'shop', 'discover', 'apps'];
+  const NAV_TABS = ['search', 'home', 'movies', 'shows', 'shop', 'apps'];
 
   // Streaming provider search URLs keyed by TMDB provider_id
   const PROVIDER_URLS = {
@@ -57,31 +59,48 @@
   const $heroWatchlist = document.getElementById('hero-watchlist');
   const $toast         = document.getElementById('toast');
 
-  // ── Live content store ─────────────────────────────────
-  let CONTENT = null;
+  // ── Content stores ─────────────────────────────────────
+  let CONTENT        = null;  // pointer to whichever tab is active
+  let HOME_CONTENT   = null;
+  let MOVIES_CONTENT = null;
+  let SHOWS_CONTENT  = null;
 
   // ── Init ───────────────────────────────────────────────
   async function init() {
     const $loader      = document.getElementById('loading-screen');
     const $loaderErr   = document.getElementById('loader-error');
+    const minWait      = new Promise(r => setTimeout(r, 4000));
+
+    // Load saved settings from localStorage
+    try {
+      const saved = localStorage.getItem('gtv_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        state.settings.region    = parsed.region    || 'US';
+        state.settings.providers = parsed.providers || [];
+      }
+    } catch (e) {}
 
     try {
       if (TMDB_KEY && TMDB_KEY !== 'YOUR_TMDB_API_KEY_HERE') {
-        CONTENT = await loadContent();
+        HOME_CONTENT = await loadContentFiltered(state.settings.region, state.settings.providers);
       } else {
-        CONTENT = STATIC_CONTENT;
+        HOME_CONTENT = STATIC_CONTENT;
       }
     } catch (err) {
       console.warn('TMDB fetch failed, using static data:', err);
-      CONTENT = STATIC_CONTENT;
+      HOME_CONTENT = STATIC_CONTENT;
       $loaderErr.textContent = '⚠ Could not reach TMDB – showing cached content. Add your API key in data.js to enable live data.';
       $loaderErr.classList.add('visible');
-      await new Promise(r => setTimeout(r, 2200));
     }
 
-    // Hide loader
+    CONTENT = HOME_CONTENT;
+
+    // Ensure loading screen shows for at least 4 seconds
+    await minWait;
+
+    // Hide loader (kept in DOM for page transition reuse)
     $loader.classList.add('hidden');
-    setTimeout(() => $loader.remove(), 500);
 
     populateBanner();
     buildRows();
@@ -91,6 +110,8 @@
     window.addEventListener('scroll', onScroll);
     setupMouseListeners();
     setupHeroOverlay();
+    setupSettingsPanel();
+    setupSearchKeyboard();
     startClock();
   }
 
@@ -114,8 +135,9 @@
   function populateBanner() {
     const slidesEl  = document.getElementById('banner-slides');
     const dotsEl    = document.getElementById('carousel-dots');
-    const prevBtn   = document.getElementById('carousel-prev');
-    const nextBtn   = document.getElementById('carousel-next');
+
+    // Reset carousel index whenever content is replaced
+    carouselIndex = 0;
 
     // Build slides
     slidesEl.innerHTML = '';
@@ -132,11 +154,19 @@
       dotsEl.appendChild(dot);
     });
 
+    // Clone prev/next to remove any stale click listeners from previous calls
+    const oldPrev = document.getElementById('carousel-prev');
+    const oldNext = document.getElementById('carousel-next');
+    const prevBtn = oldPrev.cloneNode(true);
+    const nextBtn = oldNext.cloneNode(true);
+    oldPrev.parentNode.replaceChild(prevBtn, oldPrev);
+    oldNext.parentNode.replaceChild(nextBtn, oldNext);
+
     prevBtn.addEventListener('click', () => goToSlide((carouselIndex - 1 + CONTENT.heroes.length) % CONTENT.heroes.length));
     nextBtn.addEventListener('click', () => goToSlide((carouselIndex + 1) % CONTENT.heroes.length));
 
     updateBannerContent(0);
-    startCarouselTimer();
+    resetCarouselTimer();
   }
 
   function goToSlide(idx) {
@@ -172,6 +202,7 @@
   }
 
   function startCarouselTimer() {
+    clearInterval(carouselTimer);
     carouselTimer = setInterval(() => {
       goToSlide((carouselIndex + 1) % CONTENT.heroes.length);
     }, CAROUSEL_INTERVAL);
@@ -340,7 +371,17 @@
     state.focusZone = 'nav';
     state.navIndex = idx;
     $navTabs.forEach(t => t.classList.remove('focused'));
-    $navTabs[idx]?.classList.add('focused');
+    document.querySelectorAll('.nav-icon-btn, #profile-btn').forEach(el => el.classList.remove('focused'));
+    if (idx <= 5) {
+      $navTabs[idx]?.classList.add('focused');
+    } else {
+      const rightBtns = [
+        document.getElementById('notif-btn'),
+        document.getElementById('settings-btn'),
+        document.getElementById('profile-btn'),
+      ];
+      rightBtns[idx - 6]?.classList.add('focused');
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -395,9 +436,24 @@
 
   // ── Keyboard Navigation ────────────────────────────────
   function onKeyDown(e) {
+    if (state.settingsPanelOpen) {
+      handleSettingsKeys(e);
+      return;
+    }
+
     if (state.overlayOpen) {
       handleOverlayKeys(e);
       return;
+    }
+
+    // Allow direct typing into search from physical keyboard
+    if (state.focusZone === 'search' || state.activeTab === 'search') {
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        state.focusZone = 'search';
+        typeSearchChar(e.key.toUpperCase());
+        return;
+      }
     }
 
     const key = e.key;
@@ -407,11 +463,12 @@
     }
 
     if (key === 'Escape') {
-      // do nothing on main screen (no overlay)
-      return;
+      if (state.focusZone !== 'search') return; // do nothing on main non-search screen
     }
 
-    if (state.focusZone === 'nav') {
+    if (state.focusZone === 'search') {
+      handleSearchKeys(e);
+    } else if (state.focusZone === 'nav') {
       handleNavKeys(key);
     } else if (state.focusZone === 'banner') {
       handleBannerKeys(key);
@@ -424,11 +481,26 @@
     if (key === 'ArrowLeft') {
       if (state.navIndex > 0) setNavFocus(state.navIndex - 1);
     } else if (key === 'ArrowRight') {
-      if (state.navIndex < NAV_TABS.length - 1) setNavFocus(state.navIndex + 1);
+      if (state.navIndex < 8) setNavFocus(state.navIndex + 1);
     } else if (key === 'ArrowDown') {
-      setBannerFocus(0);
+      if (state.activeTab === 'search') {
+        state.focusZone = 'search';
+        searchState.zone = 'keyboard';
+        setKbFocus(0, 0);
+        document.getElementById('search-input-wrap').classList.add('active');
+        return;
+      }
+      if (state.navIndex <= 5) setBannerFocus(0);
     } else if (key === 'Enter' || key === ' ') {
-      activateTab(state.navIndex);
+      if (state.navIndex <= 5) {
+        activateTab(state.navIndex);
+      } else if (state.navIndex === 6) {
+        showToast('🔔 No new notifications');
+      } else if (state.navIndex === 7) {
+        openSettings();
+      } else if (state.navIndex === 8) {
+        showToast('👤 Profile');
+      }
     }
   }
 
@@ -570,16 +642,89 @@
   }
 
   // ── Tab activation ─────────────────────────────────────
+  // Show the loading screen for `ms` ms as a page transition effect.
+  // Guard: only fires after init (loader already has 'hidden' class).
+  let _transitionTimer = null;
+  function showPageTransition(ms = 1500) {
+    const $loader = document.getElementById('loading-screen');
+    if (!$loader || !$loader.classList.contains('hidden')) return;
+    clearTimeout(_transitionTimer);
+    $loader.classList.remove('hidden');
+    _transitionTimer = setTimeout(() => $loader.classList.add('hidden'), ms);
+  }
+
   function activateTab(idx) {
     const tab = NAV_TABS[idx];
     state.activeTab = tab;
     syncTabActive();
 
     if (tab === 'search') {
-      showToast('🔍 Search — type to find content');
+      openSearchView();
+    } else if (tab === 'home') {
+      showPageTransition();
+      closeSearchView();
+      CONTENT = HOME_CONTENT;
+      populateBanner();
+      buildRows();
+      setBannerFocus(0);
+    } else if (tab === 'movies') {
+      showPageTransition();
+      closeSearchView();
+      if (MOVIES_CONTENT) {
+        CONTENT = MOVIES_CONTENT;
+        populateBanner();
+        buildRows();
+        setBannerFocus(0);
+      } else {
+        loadMoviesTabContent();
+      }
+    } else if (tab === 'shows') {
+      showPageTransition();
+      closeSearchView();
+      if (SHOWS_CONTENT) {
+        CONTENT = SHOWS_CONTENT;
+        populateBanner();
+        buildRows();
+        setBannerFocus(0);
+      } else {
+        loadShowsTabContent();
+      }
     } else {
+      showPageTransition();
       showToast('📺 ' + capitalise(tab));
+      setBannerFocus(0);
     }
+  }
+
+  async function loadMoviesTabContent() {
+    const $loader = document.getElementById('loading-screen');
+    if ($loader) $loader.classList.remove('hidden');
+    try {
+      MOVIES_CONTENT = await loadMoviesContent(state.settings.region, state.settings.providers);
+    } catch(e) {
+      console.warn('Movies content load failed:', e);
+      MOVIES_CONTENT = { heroes: HOME_CONTENT.heroes, rows: [] };
+    }
+    CONTENT = MOVIES_CONTENT;
+    if ($loader) $loader.classList.add('hidden');
+    populateBanner();
+    buildRows();
+    setBannerFocus(0);
+  }
+
+  async function loadShowsTabContent() {
+    const $loader = document.getElementById('loading-screen');
+    if ($loader) $loader.classList.remove('hidden');
+    try {
+      SHOWS_CONTENT = await loadShowsContent(state.settings.region, state.settings.providers);
+    } catch(e) {
+      console.warn('Shows content load failed:', e);
+      SHOWS_CONTENT = { heroes: HOME_CONTENT.heroes, rows: [] };
+    }
+    CONTENT = SHOWS_CONTENT;
+    if ($loader) $loader.classList.add('hidden');
+    populateBanner();
+    buildRows();
     setBannerFocus(0);
   }
 
@@ -587,7 +732,336 @@
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
-  // ── Overlay ────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════
+  // SEARCH
+  // ══════════════════════════════════════════════════════
+  const searchState = {
+    query:      '',
+    zone:       'keyboard',   // 'keyboard' | 'results'
+    kbRow:      0,
+    kbCol:      0,
+    resultIdx:  0,
+    results:    [],
+    debounce:   null,
+    cols:       0,            // grid columns (computed on render)
+  };
+
+  const KB_ROWS = [
+    ['A','B','C','D','E','F','G','H','I','J','K','L','M'],
+    ['N','O','P','Q','R','S','T','U','V','W','X','Y','Z'],
+    ['1','2','3','4','5','6','7','8','9','0',' ','BACK'],
+  ];
+
+  function openSearchView() {
+    document.getElementById('search-view').classList.remove('hidden');
+    document.getElementById('hero-banner').style.display = 'none';
+    document.getElementById('content-area').style.display = 'none';
+    clearInterval(carouselTimer);
+    state.focusZone = 'search';
+    searchState.zone = 'keyboard';
+    searchState.kbRow = 0;
+    searchState.kbCol = 0;
+    setKbFocus(0, 0);
+    document.getElementById('search-input-wrap').classList.add('active');
+    renderSearchResults([]); // clear
+    document.getElementById('search-results-label').textContent = 'Start typing to search…';
+  }
+
+  function closeSearchView() {
+    document.getElementById('search-view').classList.add('hidden');
+    document.getElementById('hero-banner').style.display = '';
+    document.getElementById('content-area').style.display = '';
+    startCarouselTimer();
+    searchState.query = '';
+    document.getElementById('search-input-text').textContent = '';
+    document.getElementById('search-clear-btn').classList.add('hidden');
+    document.getElementById('search-input-wrap').classList.remove('active');
+    clearKbFocus();
+    clearResultFocus();
+    renderSearchResults([]);
+  }
+
+  function setKbFocus(row, col) {
+    clearKbFocus();
+    searchState.kbRow = row;
+    searchState.kbCol = col;
+    const rows = document.querySelectorAll('.kb-row');
+    const keys = rows[row]?.querySelectorAll('.kb-key');
+    keys?.[col]?.classList.add('kb-focused');
+  }
+
+  function clearKbFocus() {
+    document.querySelectorAll('.kb-key.kb-focused').forEach(k => k.classList.remove('kb-focused'));
+  }
+
+  function clearResultFocus() {
+    document.querySelectorAll('.search-result-card.sr-focused').forEach(c => c.classList.remove('sr-focused'));
+  }
+
+  function setResultFocus(idx) {
+    clearResultFocus();
+    searchState.resultIdx = idx;
+    const cards = document.querySelectorAll('.search-result-card');
+    cards[idx]?.classList.add('sr-focused');
+    cards[idx]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function handleSearchKeys(e) {
+    const key = e.key;
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter',' ','Escape','Backspace'].includes(key)) {
+      e.preventDefault();
+    }
+
+    if (key === 'Escape') {
+      // Go back to Home
+      state.activeTab = 'home';
+      state.navIndex  = 1;
+      syncTabActive();
+      setNavFocus(1);
+      closeSearchView();
+      setBannerFocus(0);
+      return;
+    }
+
+    if (searchState.zone === 'keyboard') {
+      handleSearchKbKeys(key);
+    } else {
+      handleSearchResultKeys(key);
+    }
+  }
+
+  function handleSearchKbKeys(key) {
+    const { kbRow, kbCol } = searchState;
+    const rowLen = KB_ROWS[kbRow].length;
+
+    if (key === 'ArrowLeft') {
+      if (kbCol > 0) setKbFocus(kbRow, kbCol - 1);
+    } else if (key === 'ArrowRight') {
+      if (kbCol < rowLen - 1) setKbFocus(kbRow, kbCol + 1);
+    } else if (key === 'ArrowUp') {
+      if (kbRow > 0) {
+        const newCol = Math.min(kbCol, KB_ROWS[kbRow - 1].length - 1);
+        setKbFocus(kbRow - 1, newCol);
+      } else {
+        // Top of keyboard — go back up to nav bar
+        clearKbFocus();
+        document.getElementById('search-input-wrap').classList.remove('active');
+        setNavFocus(0); // land on Search tab
+      }
+    } else if (key === 'ArrowDown') {
+      if (kbRow < KB_ROWS.length - 1) {
+        const newCol = Math.min(kbCol, KB_ROWS[kbRow + 1].length - 1);
+        setKbFocus(kbRow + 1, newCol);
+      } else if (searchState.results.length > 0) {
+        // Drop into results
+        searchState.zone = 'results';
+        clearKbFocus();
+        document.getElementById('search-input-wrap').classList.remove('active');
+        setResultFocus(0);
+      }
+    } else if (key === 'Enter' || key === ' ') {
+      pressKbKey(kbRow, kbCol);
+    } else if (key === 'Backspace') {
+      typeSearchChar('BACK');
+    }
+  }
+
+  function handleSearchResultKeys(key) {
+    const { resultIdx, results, cols } = searchState;
+    const total = results.length;
+    if (!total) return;
+
+    if (key === 'ArrowRight') {
+      if (resultIdx < total - 1) setResultFocus(resultIdx + 1);
+    } else if (key === 'ArrowLeft') {
+      if (resultIdx > 0) setResultFocus(resultIdx - 1);
+    } else if (key === 'ArrowDown') {
+      const next = resultIdx + cols;
+      if (next < total) setResultFocus(next);
+    } else if (key === 'ArrowUp') {
+      const prev = resultIdx - cols;
+      if (prev >= 0) {
+        setResultFocus(prev);
+      } else {
+        // Back to keyboard
+        searchState.zone = 'keyboard';
+        clearResultFocus();
+        document.getElementById('search-input-wrap').classList.add('active');
+        setKbFocus(KB_ROWS.length - 1, searchState.kbCol);
+      }
+    } else if (key === 'Enter' || key === ' ') {
+      const item = searchState.results[resultIdx];
+      if (item) openOverlay(item);
+    } else if (key === 'Escape' || key === 'Backspace') {
+      searchState.zone = 'keyboard';
+      clearResultFocus();
+      document.getElementById('search-input-wrap').classList.add('active');
+      setKbFocus(KB_ROWS.length - 1, searchState.kbCol);
+    }
+  }
+
+  function pressKbKey(row, col) {
+    const char = KB_ROWS[row][col];
+    typeSearchChar(char);
+  }
+
+  function typeSearchChar(char) {
+    if (char === 'BACK') {
+      searchState.query = searchState.query.slice(0, -1);
+    } else {
+      searchState.query += char;
+    }
+    document.getElementById('search-input-text').textContent = searchState.query;
+    document.getElementById('search-clear-btn').classList.toggle('hidden', !searchState.query);
+
+    // Debounce search
+    clearTimeout(searchState.debounce);
+    if (!searchState.query.trim()) {
+      renderSearchResults([]);
+      document.getElementById('search-results-label').textContent = 'Start typing to search…';
+      return;
+    }
+    document.getElementById('search-results-label').textContent = 'Searching…';
+    searchState.debounce = setTimeout(() => runSearch(searchState.query.trim()), 500);
+  }
+
+  async function runSearch(query) {
+    try {
+      const data = await tmdbFetch('/search/multi', `&query=${encodeURIComponent(query)}&include_adult=false`);
+      const items = (data.results || [])
+        .filter(r => r.media_type === 'movie' || r.media_type === 'tv')
+        .filter(r => r.poster_path)
+        .slice(0, 40)
+        .map(r => {
+          const isTV  = r.media_type === 'tv';
+          const title = r.title || r.name || 'Unknown';
+          const year  = (r.release_date || r.first_air_date || '').slice(0, 4);
+          const rating = r.vote_average ? '★ ' + r.vote_average.toFixed(1) : '';
+          return {
+            title,
+            sub:       [year, rating].filter(Boolean).join('  ·  '),
+            meta:      [year, rating].filter(Boolean).join('  ·  '),
+            img:       posterUrl(r.poster_path),
+            backdrop:  backdropUrl(r.backdrop_path),
+            desc:      r.overview || '',
+            badge:     isTV ? 'TV' : 'Movie',
+            id:        r.id,
+            mediaType: r.media_type,
+          };
+        });
+      searchState.results = items;
+      renderSearchResults(items, query);
+    } catch (err) {
+      document.getElementById('search-results-label').textContent = 'Search unavailable — check API key';
+    }
+  }
+
+  function renderSearchResults(items, query = '') {
+    const grid  = document.getElementById('search-results-grid');
+    const label = document.getElementById('search-results-label');
+    grid.innerHTML = '';
+    clearResultFocus();
+
+    if (!items.length) {
+      if (query) label.textContent = `No results for "${query}"`;
+      return;
+    }
+
+    label.textContent = `${items.length} result${items.length !== 1 ? 's' : ''} for "${query}"`;
+
+    items.forEach((item, i) => {
+      const card = document.createElement('div');
+      card.className = 'search-result-card';
+      card.tabIndex = -1;
+
+      if (item.img) {
+        const img = document.createElement('img');
+        img.src = item.img;
+        img.alt = item.title;
+        img.loading = 'lazy';
+        img.onerror = () => {
+          const ph = document.createElement('div');
+          ph.className = 'sr-placeholder';
+          ph.innerHTML = `<span class="icon">🎬</span><span>${item.title}</span>`;
+          img.replaceWith(ph);
+        };
+        card.appendChild(img);
+      } else {
+        const ph = document.createElement('div');
+        ph.className = 'sr-placeholder';
+        ph.innerHTML = `<span class="icon">🎬</span><span>${item.title}</span>`;
+        card.appendChild(ph);
+      }
+
+      const info = document.createElement('div');
+      info.className = 'sr-info';
+      if (item.badge) {
+        const badge = document.createElement('div');
+        badge.className = 'sr-badge';
+        badge.textContent = item.badge;
+        info.appendChild(badge);
+      }
+      const titleEl = document.createElement('div');
+      titleEl.className = 'sr-title';
+      titleEl.textContent = item.title;
+      const subEl = document.createElement('div');
+      subEl.className = 'sr-sub';
+      subEl.textContent = item.sub;
+      info.appendChild(titleEl);
+      info.appendChild(subEl);
+      card.appendChild(info);
+
+      card.addEventListener('mouseenter', () => {
+        searchState.zone = 'results';
+        clearKbFocus();
+        document.getElementById('search-input-wrap').classList.remove('active');
+        setResultFocus(i);
+      });
+      card.addEventListener('click', () => openOverlay(item));
+
+      grid.appendChild(card);
+    });
+
+    // Compute how many columns the grid currently has
+    requestAnimationFrame(() => {
+      const gridRect  = grid.getBoundingClientRect();
+      const firstCard = grid.querySelector('.search-result-card');
+      if (firstCard) {
+        const cardRect = firstCard.getBoundingClientRect();
+        searchState.cols = Math.max(1, Math.round(gridRect.width / cardRect.width));
+      }
+    });
+  }
+
+  function setupSearchKeyboard() {
+    document.querySelectorAll('.kb-key').forEach(btn => {
+      const char = btn.dataset.char;
+      btn.addEventListener('click', () => {
+        typeSearchChar(char);
+        // Sync state position to the clicked key
+        const row  = parseInt(btn.closest('.kb-row').dataset.row);
+        const keys = [...btn.closest('.kb-row').querySelectorAll('.kb-key')];
+        const col  = keys.indexOf(btn);
+        searchState.kbRow = row;
+        searchState.kbCol = col;
+        searchState.zone  = 'keyboard';
+        document.getElementById('search-input-wrap').classList.add('active');
+        setKbFocus(row, col);
+      });
+    });
+
+    document.getElementById('search-clear-btn').addEventListener('click', () => {
+      searchState.query = '';
+      document.getElementById('search-input-text').textContent = '';
+      document.getElementById('search-clear-btn').classList.add('hidden');
+      renderSearchResults([]);
+      document.getElementById('search-results-label').textContent = 'Start typing to search…';
+      searchState.zone = 'keyboard';
+      document.getElementById('search-input-wrap').classList.add('active');
+      setKbFocus(0, 0);
+    });
+  }
+
   async function openOverlay(item) {
     state.overlayOpen = true;
     state.overlayItem = item;
@@ -669,7 +1143,8 @@
 
       // Providers
       if (providersRes.status === 'fulfilled') {
-        renderProviders(providersRes.value.results?.US, item.title);
+        const region = state.settings.region || 'US';
+        renderProviders(providersRes.value.results?.[region] || providersRes.value.results?.US, item.title);
       } else {
         document.getElementById('hero-providers').innerHTML = '<div class="provider-none">Provider info unavailable</div>';
       }
@@ -764,35 +1239,105 @@
 
   function renderProviders(usData, title) {
     const $prov    = document.getElementById('hero-providers');
+    const $rbSec   = document.getElementById('hero-rentbuy-section');
+    const $rb      = document.getElementById('hero-rentbuy');
     const flatrate = usData?.flatrate || [];
     const free     = usData?.free     || [];
+    const ads      = usData?.ads      || [];
+    const rent     = usData?.rent     || [];
+    const buy      = usData?.buy      || [];
     const tmdbLink = usData?.link     || null;
-    const all      = [...new Map([...flatrate, ...free].map(p => [p.provider_id, p])).values()];
+    const EXCLUDED = /amazon channel|with ads|apple tv channel|roku channel|paramount plus premium/i;
 
+    // Build a map tracking whether each provider is flatrate or free/ads
+    const streamMap = new Map();
+    flatrate.filter(p => !EXCLUDED.test(p.provider_name))
+            .forEach(p => streamMap.set(p.provider_id, { ...p, streamType: 'Subscription' }));
+    [...free, ...ads].filter(p => !EXCLUDED.test(p.provider_name))
+                     .forEach(p => {
+                       if (!streamMap.has(p.provider_id))
+                         streamMap.set(p.provider_id, { ...p, streamType: 'Free' });
+                     });
+    const all = [...streamMap.values()];
+
+    // ── Streaming ──
     if (!all.length) {
-      $prov.innerHTML = '<div class="provider-none">Not available for streaming in the US</div>';
-      return;
+      $prov.innerHTML = '<div class="provider-none">Not available for streaming in your region</div>';
+    } else {
+      $prov.innerHTML = '';
+      all.slice(0, 8).forEach(p => {
+        const urlFn = PROVIDER_URLS[p.provider_id];
+        const href  = urlFn ? urlFn(title) : (tmdbLink || '#');
+        const chip  = document.createElement('a');
+        chip.className = 'provider-chip';
+        chip.href      = href;
+        chip.target    = '_blank';
+        chip.rel       = 'noopener noreferrer';
+        chip.title     = `Watch on ${p.provider_name}`;
+        const imgEl = document.createElement('img');
+        imgEl.src     = `https://image.tmdb.org/t/p/w45${p.logo_path}`;
+        imgEl.alt     = p.provider_name;
+        imgEl.loading = 'lazy';
+        const textWrap = document.createElement('div');
+        textWrap.className = 'rent-chip-text';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'rent-chip-name';
+        nameEl.textContent = p.provider_name;
+        const subEl = document.createElement('span');
+        subEl.className = 'rent-chip-sub';
+        subEl.textContent = p.streamType;
+        textWrap.appendChild(nameEl);
+        textWrap.appendChild(subEl);
+        chip.appendChild(imgEl);
+        chip.appendChild(textWrap);
+        $prov.appendChild(chip);
+      });
     }
-    $prov.innerHTML = '';
-    all.slice(0, 8).forEach(p => {
-      const urlFn = PROVIDER_URLS[p.provider_id];
-      const href  = urlFn ? urlFn(title) : (tmdbLink || '#');
-      const chip  = document.createElement('a');
-      chip.className = 'provider-chip';
-      chip.href      = href;
-      chip.target    = '_blank';
-      chip.rel       = 'noopener noreferrer';
-      chip.title     = `Watch on ${p.provider_name}`;
-      const imgEl = document.createElement('img');
-      imgEl.src     = `https://image.tmdb.org/t/p/w45${p.logo_path}`;
-      imgEl.alt     = p.provider_name;
-      imgEl.loading = 'lazy';
-      const nameEl = document.createElement('span');
-      nameEl.textContent = p.provider_name;
-      chip.appendChild(imgEl);
-      chip.appendChild(nameEl);
-      $prov.appendChild(chip);
-    });
+
+    // ── Rent or Buy ──
+    const rbMap = new Map();
+    rent.filter(p => !EXCLUDED.test(p.provider_name))
+        .forEach(p => rbMap.set(p.provider_id, { ...p, canRent: true, canBuy: false }));
+    buy.filter(p => !EXCLUDED.test(p.provider_name))
+       .forEach(p => {
+         if (rbMap.has(p.provider_id)) rbMap.get(p.provider_id).canBuy = true;
+         else rbMap.set(p.provider_id, { ...p, canRent: false, canBuy: true });
+       });
+
+    if (rbMap.size > 0) {
+      $rbSec.classList.remove('hidden');
+      $rb.innerHTML = '';
+      [...rbMap.values()].forEach(p => {
+        const urlFn = PROVIDER_URLS[p.provider_id];
+        const href  = urlFn ? urlFn(title) : (tmdbLink || '#');
+        const chip  = document.createElement('a');
+        chip.className = 'provider-chip rent-chip';
+        chip.href      = href;
+        chip.target    = '_blank';
+        chip.rel       = 'noopener noreferrer';
+        chip.title     = `Rent or buy on ${p.provider_name}`;
+        const imgEl = document.createElement('img');
+        imgEl.src     = `https://image.tmdb.org/t/p/w45${p.logo_path}`;
+        imgEl.alt     = p.provider_name;
+        imgEl.loading = 'lazy';
+        const textWrap = document.createElement('div');
+        textWrap.className = 'rent-chip-text';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'rent-chip-name';
+        nameEl.textContent = p.provider_name;
+        const subEl = document.createElement('span');
+        subEl.className = 'rent-chip-sub';
+        subEl.textContent = p.canRent && p.canBuy ? 'Rent or Buy' : p.canRent ? 'Rent' : 'Buy';
+        textWrap.appendChild(nameEl);
+        textWrap.appendChild(subEl);
+        chip.appendChild(imgEl);
+        chip.appendChild(textWrap);
+        $rb.appendChild(chip);
+      });
+    } else {
+      $rbSec.classList.add('hidden');
+    }
+
     // Re-sync focus ring if already on providers section
     if (state.overlaySection === 'providers') {
       setOverlayFocus('providers', state.overlayCol);
@@ -843,7 +1388,17 @@
         activateTab(i);
       });
     });
-  }
+    // Right nav icons
+    const notifBtn    = document.getElementById('notif-btn');
+    const settingsBtn = document.getElementById('settings-btn');
+    const profileBtn  = document.getElementById('profile-btn');
+
+    notifBtn.addEventListener('mouseenter',    () => setNavFocus(6));
+    notifBtn.addEventListener('click',         () => showToast('🔔 No new notifications'));
+    settingsBtn.addEventListener('mouseenter', () => setNavFocus(7));
+    settingsBtn.addEventListener('click',      () => openSettings());
+    profileBtn.addEventListener('mouseenter',  () => setNavFocus(8));
+    profileBtn.addEventListener('click',       () => showToast('👤 Profile'));  }
 
   // ── Scroll handling ────────────────────────────────────
   function onScroll() {
@@ -862,7 +1417,173 @@
     $toast.classList.add('show');
     toastTimer = setTimeout(() => $toast.classList.remove('show'), 2500);
   }
+  // ── Settings keyboard navigation ─────────────────────────
+  let settingsFocusIdx = 0;
 
+  function getSettingsFocusItems() {
+    return [
+      document.getElementById('settings-country'),
+      ...document.querySelectorAll('#settings-provider-grid .svc-chip'),
+      document.getElementById('settings-apply-btn'),
+      document.getElementById('settings-clear-btn'),
+    ];
+  }
+
+  function setSettingsFocus(idx) {
+    const items = getSettingsFocusItems();
+    settingsFocusIdx = Math.max(0, Math.min(idx, items.length - 1));
+    items.forEach(el => el.classList.remove('settings-nav-focus'));
+    const item = items[settingsFocusIdx];
+    if (item) {
+      item.classList.add('settings-nav-focus');
+      item.focus();
+      item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
+
+  function getChipsPerRow() {
+    const chips = [...document.querySelectorAll('#settings-provider-grid .svc-chip')];
+    if (chips.length < 2) return chips.length || 1;
+    const firstTop = chips[0].getBoundingClientRect().top;
+    let count = 0;
+    for (const chip of chips) {
+      if (Math.abs(chip.getBoundingClientRect().top - firstTop) < 4) count++;
+      else break;
+    }
+    return count || 2;
+  }
+
+  function handleSettingsKeys(e) {
+    const key = e.key;
+    if (key === 'Escape') { e.preventDefault(); closeSettings(); return; }
+
+    const chips    = [...document.querySelectorAll('#settings-provider-grid .svc-chip')];
+    const numChips = chips.length;
+    const chipsStart = 1;
+    const chipsEnd   = chipsStart + numChips - 1;
+    const items    = getSettingsFocusItems();
+    const inChips  = settingsFocusIdx >= chipsStart && settingsFocusIdx <= chipsEnd;
+    const isSelect = settingsFocusIdx === 0;
+    const isAction = settingsFocusIdx > chipsEnd;
+
+    if (key === 'ArrowRight') {
+      e.preventDefault();
+      if (isSelect) {
+        const sel = items[0];
+        if (sel.selectedIndex < sel.options.length - 1) sel.selectedIndex++;
+      } else {
+        setSettingsFocus(Math.min(settingsFocusIdx + 1, items.length - 1));
+      }
+    } else if (key === 'ArrowLeft') {
+      e.preventDefault();
+      if (isSelect) {
+        const sel = items[0];
+        if (sel.selectedIndex > 0) sel.selectedIndex--;
+      } else {
+        setSettingsFocus(Math.max(settingsFocusIdx - 1, 0));
+      }
+    } else if (key === 'ArrowDown') {
+      e.preventDefault();
+      if (isSelect) {
+        const sel = items[0];
+        if (sel.selectedIndex < sel.options.length - 1) { sel.selectedIndex++; }
+        else { setSettingsFocus(chipsStart); }
+      } else if (inChips) {
+        const perRow = getChipsPerRow();
+        const nextIdx = settingsFocusIdx + perRow;
+        setSettingsFocus(nextIdx > chipsEnd ? chipsEnd + 1 : nextIdx);
+      } else if (isAction) {
+        setSettingsFocus(Math.min(settingsFocusIdx + 1, items.length - 1));
+      }
+    } else if (key === 'ArrowUp') {
+      e.preventDefault();
+      if (isSelect) {
+        const sel = items[0];
+        if (sel.selectedIndex > 0) sel.selectedIndex--;
+      } else if (inChips) {
+        const perRow = getChipsPerRow();
+        const prevIdx = settingsFocusIdx - perRow;
+        setSettingsFocus(prevIdx < chipsStart ? 0 : prevIdx);
+      } else if (isAction) {
+        setSettingsFocus(chipsEnd);
+      }
+    } else if (key === 'Enter' || key === ' ') {
+      e.preventDefault();
+      const item = items[settingsFocusIdx];
+      if (item) item.click();
+    }
+  }
+
+  // ── Settings Panel ───────────────────────────────────────
+  function openSettings() {
+    state.settingsPanelOpen = true;
+    document.getElementById('settings-panel').classList.remove('hidden');
+    document.getElementById('settings-country').value = state.settings.region;
+    renderProviderChips();
+    settingsFocusIdx = 0;
+    requestAnimationFrame(() => setSettingsFocus(0));
+  }
+
+  function closeSettings() {
+    state.settingsPanelOpen = false;
+    document.getElementById('settings-panel').classList.add('hidden');
+    setNavFocus(7);
+  }
+
+  function renderProviderChips() {
+    const grid = document.getElementById('settings-provider-grid');
+    grid.innerHTML = '';
+    STREAMING_SERVICES.forEach(svc => {
+      const btn = document.createElement('button');
+      btn.className = 'svc-chip' + (state.settings.providers.includes(svc.id) ? ' selected' : '');
+      btn.textContent = svc.name;
+      btn.dataset.id = svc.id;
+      btn.addEventListener('click', () => btn.classList.toggle('selected'));
+      grid.appendChild(btn);
+    });
+  }
+
+  async function applySettings() {
+    const region   = document.getElementById('settings-country').value;
+    const selected = [...document.querySelectorAll('.svc-chip.selected')].map(b => parseInt(b.dataset.id));
+
+    state.settings.region    = region;
+    state.settings.providers = selected;
+    try { localStorage.setItem('gtv_settings', JSON.stringify(state.settings)); } catch(e) {}
+
+    closeSettings();
+
+    const hasKey = TMDB_KEY && TMDB_KEY !== 'YOUR_TMDB_API_KEY_HERE';
+    if (!hasKey) { showToast('⚙️ Settings saved'); return; }
+
+    showToast('🔄 Updating content…');
+    try {
+      HOME_CONTENT   = await loadContentFiltered(region, selected);
+      MOVIES_CONTENT = null; // will reload with new filters on next visit
+      SHOWS_CONTENT  = null; // will reload with new filters on next visit
+      CONTENT = HOME_CONTENT;
+    } catch(e) {
+      showToast('⚠️ Could not update — keeping current content');
+      return;
+    }
+    populateBanner();
+    buildRows();
+    setBannerFocus(0);
+    const label = selected.length
+      ? `✓ Showing content for ${selected.length} service${selected.length > 1 ? 's' : ''}`
+      : '✓ Showing all content';
+    showToast(label);
+  }
+
+  function setupSettingsPanel() {
+    document.getElementById('settings-close').addEventListener('click', closeSettings);
+    document.getElementById('settings-backdrop').addEventListener('click', closeSettings);
+    document.getElementById('settings-apply-btn').addEventListener('click', applySettings);
+    document.getElementById('settings-clear-btn').addEventListener('click', () => {
+      document.querySelectorAll('.svc-chip').forEach(c => c.classList.remove('selected'));
+      applySettings();
+    });
+  }
   // ── Start ──────────────────────────────────────────────
   init();
 

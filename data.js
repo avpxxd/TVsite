@@ -52,24 +52,49 @@ function toCard(item, badge = '') {
 }
 
 async function loadContent() {
+  // Random page (2-8) so the home screen shows different content on every load
+  const p = Math.floor(Math.random() * 7) + 2;
+
   const [
     trendingMovies,
-    nowPlaying,
     popularMovies,
     popularTV,
     topRatedMovies,
     topRatedTV,
     upcoming,
     trendingAll,
+    freeMovies,
+    freeTV,
+    comedyMovies,
+    comedyTV,
+    horrorMovies,
+    scifiMovies,
+    scifiTV,
+    romanceMovies,
+    thrillerMovies,
+    actionMovies,
+    crimeTV,
+    animationMovies,
   ] = await Promise.all([
-    tmdbFetch('/trending/movie/week'),
-    tmdbFetch('/movie/now_playing'),
-    tmdbFetch('/movie/popular'),
-    tmdbFetch('/tv/popular'),
-    tmdbFetch('/movie/top_rated'),
-    tmdbFetch('/tv/top_rated'),
-    tmdbFetch('/movie/upcoming'),
-    tmdbFetch('/trending/all/week'),
+    tmdbFetch('/trending/movie/week', `&page=${p}`),
+    tmdbFetch('/movie/popular',    `&page=${p}`),
+    tmdbFetch('/tv/popular',       `&page=${p}`),
+    tmdbFetch('/movie/top_rated',  `&page=${p}`),
+    tmdbFetch('/tv/top_rated',     `&page=${p}`),
+    tmdbFetch('/movie/upcoming',  `&page=${fp}`),
+    tmdbFetch('/trending/all/week', `&page=${p}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&watch_region=US&with_watch_monetization_types=free|ads&page=${fp}`),
+    tmdbFetch('/discover/tv',    `&sort_by=popularity.desc&watch_region=US&with_watch_monetization_types=free|ads&page=${fp}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=35&page=${p}`),
+    tmdbFetch('/discover/tv',    `&sort_by=popularity.desc&with_genres=35&page=${p}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=27&page=${p}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=878&page=${p}`),
+    tmdbFetch('/discover/tv',    `&sort_by=popularity.desc&with_genres=10765&page=${p}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=10749&page=${p}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=53&page=${p}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=28&page=${p}`),
+    tmdbFetch('/discover/tv',    `&sort_by=popularity.desc&with_genres=80&page=${p}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=16&page=${p}`),
   ]);
 
   const heroes = trendingMovies.results
@@ -77,15 +102,361 @@ async function loadContent() {
     .slice(0, 6)
     .map(toHero);
 
+  // Interleave free movies and free TV for a mixed row
+  const freeItems = [];
+  const fm = freeMovies.results.slice(0, 10);
+  const ft = freeTV.results.slice(0, 10);
+  for (let i = 0; i < Math.max(fm.length, ft.length); i++) {
+    if (fm[i]) freeItems.push(toCard(fm[i], 'FREE'));
+    if (ft[i]) freeItems.push(toCard({ ...ft[i], media_type: 'tv' }, 'FREE'));
+  }
+
+  // Interleave comedy movies + TV
+  const comedyItems = [];
+  const cm = comedyMovies.results.slice(0, 10);
+  const ct = comedyTV.results.slice(0, 10);
+  for (let i = 0; i < Math.max(cm.length, ct.length); i++) {
+    if (cm[i]) comedyItems.push(toCard(cm[i]));
+    if (ct[i]) comedyItems.push(toCard({ ...ct[i], media_type: 'tv' }));
+  }
+
+  // Interleave sci-fi movies + TV
+  const scifiItems = [];
+  const sm = scifiMovies.results.slice(0, 10);
+  const st = scifiTV.results.slice(0, 10);
+  for (let i = 0; i < Math.max(sm.length, st.length); i++) {
+    if (sm[i]) scifiItems.push(toCard(sm[i]));
+    if (st[i]) scifiItems.push(toCard({ ...st[i], media_type: 'tv' }));
+  }
+
   const rows = [
-    { label: 'Now Playing',       items: nowPlaying.results.slice(0, 15).map(m => toCard(m)) },
-    { label: 'Popular Movies',    items: popularMovies.results.slice(0, 15).map(m => toCard(m)) },
-    { label: 'Popular TV Shows',  items: popularTV.results.slice(0, 15).map(m => toCard(m)) },
-    { label: 'Top Rated Movies',  items: topRatedMovies.results.slice(0, 15).map(m => toCard(m, 'TOP')) },
-    { label: 'Top Rated TV',      items: topRatedTV.results.slice(0, 15).map(m => toCard(m, 'TOP')) },
-    { label: 'Upcoming Movies',   items: upcoming.results.slice(0, 15).map(m => toCard(m, 'NEW')) },
-    { label: 'Fan Favorites',     items: trendingAll.results.filter(m => m.media_type !== 'person').slice(0, 15).map(m => toCard(m)) },
+    { label: 'Popular Movies',       items: popularMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Popular TV Shows',     items: popularTV.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Free to Watch',        items: freeItems.slice(0, 15) },
+    { label: 'Action Movies',        items: actionMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Comedy',               items: comedyItems.slice(0, 15) },
+    { label: 'Horror Movies',        items: horrorMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Romance Movies',       items: romanceMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Sci-Fi & Fantasy',     items: scifiItems.slice(0, 15) },
+    { label: 'Thriller & Suspense',  items: thrillerMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Crime TV',             items: crimeTV.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'Animation',            items: animationMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Top Rated Movies',     items: topRatedMovies.results.slice(0, 15).map(m => toCard(m, 'TOP')) },
+    { label: 'Top Rated TV',         items: topRatedTV.results.slice(0, 15).map(m => toCard(m, 'TOP')) },
+    { label: 'Upcoming Movies',      items: upcoming.results.slice(0, 15).map(m => toCard(m, 'NEW')) },
+    { label: 'Fan Favorites',        items: trendingAll.results.filter(m => m.media_type !== 'person').slice(0, 15).map(m => toCard(m)) },
   ];
+
+  return { heroes, rows };
+}
+
+// ── Streaming services list ───────────────────────────────────────────────────
+const STREAMING_SERVICES = [
+  { id: 8,   name: 'Netflix' },
+  { id: 9,   name: 'Prime Video' },
+  { id: 337, name: 'Disney+' },
+  { id: 384, name: 'Max' },
+  { id: 386, name: 'Peacock' },
+  { id: 531, name: 'Paramount+' },
+  { id: 350, name: 'Apple TV+' },
+  { id: 283, name: 'Crunchyroll' },
+  { id: 43,  name: 'Starz' },
+  { id: 37,  name: 'Showtime' },
+];
+
+// ── Filtered content loader ───────────────────────────────────────────────────
+// When providerIds is empty, falls back to the regular unfiltered endpoints.
+async function loadContentFiltered(region = 'US', providerIds = []) {
+  if (!providerIds.length) return loadContent();
+
+  // Random page (2-8) so the home screen shows different content on every load
+  const p  = Math.floor(Math.random() * 7) + 2;
+  const fp = Math.floor(Math.random() * 4) + 1; // free/upcoming have fewer pages
+
+  // Disney+ (337) and Hulu (15) are merged — always include Hulu when Disney+ is selected
+  const effectiveIds = providerIds.includes(337) && !providerIds.includes(15)
+    ? [...providerIds, 15]
+    : providerIds;
+
+  const provStr   = effectiveIds.join('|');
+  const provParam = `&watch_region=${region}&with_watch_providers=${provStr}&with_watch_monetization_types=flatrate`;
+
+  const freeParam = `&sort_by=popularity.desc&watch_region=${region}&with_watch_monetization_types=free|ads&page=${fp}`;
+
+  const [
+    trendingMovies,
+    popMovies,
+    popTV,
+    topMovies,
+    topTV,
+    freeMovies,
+    freeTV,
+    comedyMovies,
+    comedyTV,
+    horrorMovies,
+    actionMovies,
+    scifiMovies,
+    scifiTV,
+    romanceMovies,
+    thrillerMovies,
+    dramaTV,
+    crimeTV,
+    animationMovies,
+  ] = await Promise.all([
+    tmdbFetch('/trending/movie/week', `&page=${p}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&page=${p}${provParam}`),
+    tmdbFetch('/discover/tv',    `&sort_by=popularity.desc&page=${p}${provParam}`),
+    tmdbFetch('/discover/movie', `&sort_by=vote_average.desc&vote_count.gte=200&page=${p}${provParam}`),
+    tmdbFetch('/discover/tv',    `&sort_by=vote_average.desc&vote_count.gte=100&page=${p}${provParam}`),
+    tmdbFetch('/discover/movie', freeParam),
+    tmdbFetch('/discover/tv',    freeParam),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=35&page=${p}${provParam}`),
+    tmdbFetch('/discover/tv',    `&sort_by=popularity.desc&with_genres=35&page=${p}${provParam}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=27&page=${p}${provParam}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=28&page=${p}${provParam}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=878&page=${p}${provParam}`),
+    tmdbFetch('/discover/tv',    `&sort_by=popularity.desc&with_genres=10765&page=${p}${provParam}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=10749&page=${p}${provParam}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=53&page=${p}${provParam}`),
+    tmdbFetch('/discover/tv',    `&sort_by=popularity.desc&with_genres=18&page=${p}${provParam}`),
+    tmdbFetch('/discover/tv',    `&sort_by=popularity.desc&with_genres=80&page=${p}${provParam}`),
+    tmdbFetch('/discover/movie', `&sort_by=popularity.desc&with_genres=16&page=${p}${provParam}`),
+  ]);
+
+  const heroes = trendingMovies.results
+    .filter(m => m.backdrop_path)
+    .slice(0, 6)
+    .map(toHero);
+
+  // Interleave free movies and free TV for a mixed row
+  const freeItems = [];
+  const fm = freeMovies.results.slice(0, 10);
+  const ft = freeTV.results.slice(0, 10);
+  for (let i = 0; i < Math.max(fm.length, ft.length); i++) {
+    if (fm[i]) freeItems.push(toCard(fm[i], 'FREE'));
+    if (ft[i]) freeItems.push(toCard({ ...ft[i], media_type: 'tv' }, 'FREE'));
+  }
+
+  // Interleave comedy movies + TV
+  const comedyItems = [];
+  const cm = comedyMovies.results.slice(0, 10);
+  const ct = comedyTV.results.slice(0, 10);
+  for (let i = 0; i < Math.max(cm.length, ct.length); i++) {
+    if (cm[i]) comedyItems.push(toCard(cm[i]));
+    if (ct[i]) comedyItems.push(toCard({ ...ct[i], media_type: 'tv' }));
+  }
+
+  // Interleave sci-fi movies + TV
+  const scifiItems = [];
+  const sm = scifiMovies.results.slice(0, 10);
+  const st = scifiTV.results.slice(0, 10);
+  for (let i = 0; i < Math.max(sm.length, st.length); i++) {
+    if (sm[i]) scifiItems.push(toCard(sm[i]));
+    if (st[i]) scifiItems.push(toCard({ ...st[i], media_type: 'tv' }));
+  }
+
+  const rows = [
+    { label: 'Popular on Your Streaming Services',  items: popMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'TV Shows on Your Streaming Services', items: popTV.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Free to Watch',                       items: freeItems.slice(0, 15) },
+    { label: 'Action Movies',                       items: actionMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Comedy',                              items: comedyItems.slice(0, 15) },
+    { label: 'Horror Movies',                       items: horrorMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Romance Movies',                      items: romanceMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Sci-Fi & Fantasy',                    items: scifiItems.slice(0, 15) },
+    { label: 'Thriller & Suspense',                 items: thrillerMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Drama TV Shows',                      items: dramaTV.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Crime TV',                            items: crimeTV.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'Animation',                           items: animationMovies.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Top Rated Movies',                    items: topMovies.results.slice(0, 15).map(m => toCard(m, 'TOP')) },
+    { label: 'Top Rated TV',                        items: topTV.results.slice(0, 15).map(m => toCard(m, 'TOP')) },
+  ].filter(row => row.items.length > 0);
+
+  return { heroes, rows };
+}
+
+// ── Movies-only content loader ────────────────────────────────────────────────
+async function loadMoviesContent(region = 'US', providerIds = []) {
+  const effectiveIds = providerIds.includes(337) && !providerIds.includes(15)
+    ? [...providerIds, 15] : providerIds;
+  const hasFilter = effectiveIds.length > 0;
+
+  const regionParam = `&watch_region=${region}`;
+  const provStr  = effectiveIds.join('|');
+  const provParam = hasFilter
+    ? `${regionParam}&with_watch_providers=${provStr}&with_watch_monetization_types=flatrate`
+    : regionParam;
+  const genreBase = `&sort_by=popularity.desc${provParam}`;
+
+  // Other services = all known services minus the selected ones
+  const ALL_IDS  = STREAMING_SERVICES.map(s => s.id);
+  const otherIds = hasFilter ? ALL_IDS.filter(id => !effectiveIds.includes(id)) : [];
+  const otherParam = otherIds.length
+    ? `&sort_by=popularity.desc&watch_region=${region}&with_watch_providers=${otherIds.join('|')}&with_watch_monetization_types=flatrate`
+    : null;
+
+  const rentParam = `&sort_by=popularity.desc${regionParam}&with_watch_monetization_types=rent|buy`;
+  const freeParam = `&sort_by=popularity.desc${regionParam}&with_watch_monetization_types=free|ads`;
+
+  const baseFetches = [
+    tmdbFetch('/trending/movie/week'),
+    tmdbFetch('/movie/now_playing', regionParam),
+    hasFilter
+      ? tmdbFetch('/discover/movie', `&sort_by=popularity.desc${provParam}`)
+      : tmdbFetch('/movie/popular'),
+    hasFilter
+      ? tmdbFetch('/discover/movie', `&sort_by=vote_average.desc&vote_count.gte=200${provParam}`)
+      : tmdbFetch('/movie/top_rated'),
+    tmdbFetch('/movie/upcoming', regionParam),
+    tmdbFetch('/discover/movie', `&with_genres=28${genreBase}`),
+    tmdbFetch('/discover/movie', `&with_genres=35${genreBase}`),
+    tmdbFetch('/discover/movie', `&with_genres=27${genreBase}`),
+    tmdbFetch('/discover/movie', `&with_genres=10749${genreBase}`),
+    tmdbFetch('/discover/movie', `&with_genres=878${genreBase}`),
+    tmdbFetch('/discover/movie', `&with_genres=53${genreBase}`),
+    tmdbFetch('/discover/movie', `&with_genres=16${genreBase}`),
+    tmdbFetch('/discover/movie', rentParam),
+    tmdbFetch('/discover/movie', freeParam),
+    ...(otherParam ? [tmdbFetch('/discover/movie', otherParam)] : []),
+  ];
+
+  const results = await Promise.all(baseFetches);
+  const [trending, nowPlaying, popular, topRated, upcoming,
+         action, comedy, horror, romance, scifi, thriller, animation,
+         rentBuy, freeMovies] = results;
+  const otherServices = otherParam ? results[14] : null;
+
+  const heroes = trending.results
+    .filter(m => m.backdrop_path)
+    .slice(0, 6)
+    .map(toHero);
+
+  const rows = [
+    { label: hasFilter ? 'Popular on Your Services' : 'Popular Movies',
+      items: popular.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'In Theatres Now',
+      items: nowPlaying.results.slice(0, 15).map(m => toCard(m, 'NEW')) },
+    { label: 'Action',
+      items: action.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Comedy',
+      items: comedy.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Horror',
+      items: horror.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Romance',
+      items: romance.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Sci-Fi',
+      items: scifi.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Thriller & Suspense',
+      items: thriller.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Animation',
+      items: animation.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Free to Watch',
+      items: freeMovies.results.slice(0, 15).map(m => toCard(m, 'FREE')) },
+    ...(otherServices?.results.length
+      ? [{ label: 'Also Streaming — Not on Your Services',
+           items: otherServices.results.slice(0, 15).map(m => toCard(m)) }]
+      : []),
+    { label: 'Available to Rent or Buy',
+      items: rentBuy.results.slice(0, 15).map(m => toCard(m)) },
+    { label: 'Top Rated',
+      items: topRated.results.slice(0, 15).map(m => toCard(m, 'TOP')) },
+    { label: 'Coming Soon',
+      items: upcoming.results.slice(0, 15).map(m => toCard(m, 'NEW')) },
+  ].filter(row => row.items.length > 0);
+
+  return { heroes, rows };
+}
+
+// ── Shows-only content loader ────────────────────────────────────────────────
+async function loadShowsContent(region = 'US', providerIds = []) {
+  const effectiveIds = providerIds.includes(337) && !providerIds.includes(15)
+    ? [...providerIds, 15] : providerIds;
+  const hasFilter = effectiveIds.length > 0;
+
+  const regionParam = `&watch_region=${region}`;
+  const provStr   = effectiveIds.join('|');
+  const provParam = hasFilter
+    ? `${regionParam}&with_watch_providers=${provStr}&with_watch_monetization_types=flatrate`
+    : regionParam;
+  const genreBase = `&sort_by=popularity.desc${provParam}`;
+
+  const ALL_IDS  = STREAMING_SERVICES.map(s => s.id);
+  const otherIds = hasFilter ? ALL_IDS.filter(id => !effectiveIds.includes(id)) : [];
+  const otherParam = otherIds.length
+    ? `&sort_by=popularity.desc&watch_region=${region}&with_watch_providers=${otherIds.join('|')}&with_watch_monetization_types=flatrate`
+    : null;
+
+  // "New Episodes" = shows sorted by first_air_date that aired in the last 90 days
+  const today     = new Date();
+  const pastDate  = new Date(today - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const todayStr  = today.toISOString().slice(0, 10);
+  const newEpParam = `&sort_by=first_air_date.desc&first_air_date.gte=${pastDate}&first_air_date.lte=${todayStr}${provParam}`;
+
+  const rentParam = `&sort_by=popularity.desc${regionParam}&with_watch_monetization_types=rent|buy`;
+  const freeParam = `&sort_by=popularity.desc${regionParam}&with_watch_monetization_types=free|ads`;
+
+  const baseFetches = [
+    tmdbFetch('/trending/tv/week'),
+    tmdbFetch('/discover/tv', newEpParam),
+    hasFilter
+      ? tmdbFetch('/discover/tv', `&sort_by=popularity.desc${provParam}`)
+      : tmdbFetch('/tv/popular'),
+    hasFilter
+      ? tmdbFetch('/discover/tv', `&sort_by=vote_average.desc&vote_count.gte=100${provParam}`)
+      : tmdbFetch('/tv/top_rated'),
+    tmdbFetch('/discover/tv', `&with_genres=35${genreBase}`),
+    tmdbFetch('/discover/tv', `&with_genres=18${genreBase}`),
+    tmdbFetch('/discover/tv', `&with_genres=27${genreBase}`),
+    tmdbFetch('/discover/tv', `&with_genres=10765${genreBase}`),
+    tmdbFetch('/discover/tv', `&with_genres=80${genreBase}`),
+    tmdbFetch('/discover/tv', `&with_genres=10759${genreBase}`),
+    tmdbFetch('/discover/tv', `&with_genres=16${genreBase}`),
+    tmdbFetch('/discover/tv', freeParam),
+    tmdbFetch('/discover/tv', rentParam),
+    ...(otherParam ? [tmdbFetch('/discover/tv', otherParam)] : []),
+  ];
+
+  const results = await Promise.all(baseFetches);
+  const [trending, newEpisodes, popular, topRated,
+         comedy, drama, horror, scifi, crime, action, animation,
+         freeShows, rentBuy] = results;
+  const otherServices = otherParam ? results[13] : null;
+
+  const heroes = trending.results
+    .filter(m => m.backdrop_path)
+    .slice(0, 6)
+    .map(h => toHero({ ...h, media_type: 'tv' }));
+
+  const rows = [
+    { label: hasFilter ? 'Popular on Your Services' : 'Popular Shows',
+      items: popular.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'New Episodes & Seasons',
+      items: newEpisodes.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' }, 'NEW')) },
+    { label: 'Drama',
+      items: drama.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'Comedy',
+      items: comedy.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'Action & Adventure',
+      items: action.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'Sci-Fi & Fantasy',
+      items: scifi.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'Crime & Mystery',
+      items: crime.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'Horror',
+      items: horror.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'Animation',
+      items: animation.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'Free to Watch',
+      items: freeShows.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' }, 'FREE')) },
+    ...(otherServices?.results.length
+      ? [{ label: 'Also Streaming — Not on Your Services',
+           items: otherServices.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) }]
+      : []),
+    { label: 'Buy the Season',
+      items: rentBuy.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' })) },
+    { label: 'Top Rated',
+      items: topRated.results.slice(0, 15).map(m => toCard({ ...m, media_type: 'tv' }, 'TOP')) },
+  ].filter(row => row.items.length > 0);
 
   return { heroes, rows };
 }

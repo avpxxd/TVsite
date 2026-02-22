@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Google TV</title>
+  <title>C.ME TV</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <link rel="stylesheet" href="style.css"/>
 </head>
@@ -11,10 +11,16 @@
 
 <!-- Loading Screen -->
 <div id="loading-screen">
-  <div class="loader-logo">
-    <span>Fetching Shows &amp; Movies</span>
+  <div class="loader-frame">
+    <div class="lc lc-tl"></div>
+    <div class="lc lc-tr"></div>
+    <div class="lc lc-bl"></div>
+    <div class="lc lc-br"></div>
   </div>
-  <div class="loader-spinner"></div>
+  <div class="loader-center">
+    <span class="loader-text">Loading</span>
+    <div class="loader-spinner"></div>
+  </div>
   <div id="loader-error" class="loader-error"></div>
 </div>
 
@@ -42,6 +48,11 @@
         <div id="hero-providers"><div class="overlay-skeleton">Checking availability…</div></div>
       </div>
 
+      <div id="hero-rentbuy-section" class="hidden">
+        <div class="overlay-section-label">Rent or Buy</div>
+        <div id="hero-rentbuy"></div>
+      </div>
+
       <div id="hero-cast-section">
         <div class="overlay-section-label">Cast</div>
         <div id="hero-cast"><div class="overlay-skeleton">Loading cast…</div></div>
@@ -63,9 +74,9 @@
     <ul id="nav-tabs">
       <li class="nav-tab" data-tab="search"><i class="fas fa-magnifying-glass"></i> Search</li>
       <li class="nav-tab active focused" data-tab="home">Home</li>
-      <li class="nav-tab" data-tab="live">Live</li>
+      <li class="nav-tab" data-tab="movies">Movies</li>
+      <li class="nav-tab" data-tab="shows">Shows</li>
       <li class="nav-tab" data-tab="shop">Shop</li>
-      <li class="nav-tab" data-tab="discover">Discover</li>
       <li class="nav-tab" data-tab="apps">Apps</li>
     </ul>
     <div id="nav-right">
@@ -76,7 +87,7 @@
       <div class="nav-icon-btn" id="settings-btn" title="Settings">
         <i class="fas fa-gear"></i>
       </div>
-      <div class="avatar" title="Profile">L</div>
+      <div class="avatar" id="profile-btn" title="Profile">L</div>
       <div id="nav-clock"></div>
     </div>
   </nav>
@@ -107,8 +118,108 @@
 
 </div>
 
+<!-- Search View -->
+<div id="search-view" class="hidden">
+  <div id="search-header">
+    <div id="search-input-wrap">
+      <i class="fas fa-magnifying-glass"></i>
+      <div id="search-input-display">
+        <span id="search-input-text"></span><span class="search-cursor">|</span>
+      </div>
+      <button id="search-clear-btn" class="hidden" title="Clear">&#10005;</button>
+    </div>
+  </div>
+
+  <div id="search-keyboard">
+    <div class="kb-row" data-row="0">
+      <button class="kb-key" data-char="A">A</button>
+      <button class="kb-key" data-char="B">B</button>
+      <button class="kb-key" data-char="C">C</button>
+      <button class="kb-key" data-char="D">D</button>
+      <button class="kb-key" data-char="E">E</button>
+      <button class="kb-key" data-char="F">F</button>
+      <button class="kb-key" data-char="G">G</button>
+      <button class="kb-key" data-char="H">H</button>
+      <button class="kb-key" data-char="I">I</button>
+      <button class="kb-key" data-char="J">J</button>
+      <button class="kb-key" data-char="K">K</button>
+      <button class="kb-key" data-char="L">L</button>
+      <button class="kb-key" data-char="M">M</button>
+    </div>
+    <div class="kb-row" data-row="1">
+      <button class="kb-key" data-char="N">N</button>
+      <button class="kb-key" data-char="O">O</button>
+      <button class="kb-key" data-char="P">P</button>
+      <button class="kb-key" data-char="Q">Q</button>
+      <button class="kb-key" data-char="R">R</button>
+      <button class="kb-key" data-char="S">S</button>
+      <button class="kb-key" data-char="T">T</button>
+      <button class="kb-key" data-char="U">U</button>
+      <button class="kb-key" data-char="V">V</button>
+      <button class="kb-key" data-char="W">W</button>
+      <button class="kb-key" data-char="X">X</button>
+      <button class="kb-key" data-char="Y">Y</button>
+      <button class="kb-key" data-char="Z">Z</button>
+    </div>
+    <div class="kb-row" data-row="2">
+      <button class="kb-key" data-char="1">1</button>
+      <button class="kb-key" data-char="2">2</button>
+      <button class="kb-key" data-char="3">3</button>
+      <button class="kb-key" data-char="4">4</button>
+      <button class="kb-key" data-char="5">5</button>
+      <button class="kb-key" data-char="6">6</button>
+      <button class="kb-key" data-char="7">7</button>
+      <button class="kb-key" data-char="8">8</button>
+      <button class="kb-key" data-char="9">9</button>
+      <button class="kb-key" data-char="0">0</button>
+      <button class="kb-key kb-space" data-char=" ">Space</button>
+      <button class="kb-key kb-back" data-char="BACK">&#9003;</button>
+    </div>
+  </div>
+
+  <div id="search-results-area">
+    <div id="search-results-label"></div>
+    <div id="search-results-grid"></div>
+  </div>
+</div>
+
 <!-- Notification Toast -->
 <div id="toast"></div>
+
+
+<!-- Settings Panel -->
+<div id="settings-panel" class="hidden">
+  <div id="settings-backdrop"></div>
+  <div id="settings-drawer">
+    <div id="settings-header">
+      <span><i class="fas fa-gear"></i> Settings</span>
+      <button id="settings-close" title="Close">&#10005;</button>
+    </div>
+    <div id="settings-body">
+
+      <div class="settings-section">
+        <div class="settings-section-title">Country / Region</div>
+        <p class="settings-section-desc">Affects where-to-watch availability and content recommendations</p>
+        <select id="settings-country">
+          <option value="CA">🇨🇦 Canada</option>
+          <option value="GB">🇬🇧 United Kingdom</option>
+          <option value="US">🇺🇸 United States</option>
+        </select>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">Your Streaming Services</div>
+        <p class="settings-section-desc">Select your subscriptions to filter content to only what you can watch. Leave all unchecked to show everything.</p>
+        <div id="settings-provider-grid"></div>
+      </div>
+
+    </div>
+    <div id="settings-footer">
+      <button id="settings-apply-btn">Apply Changes</button>
+      <button id="settings-clear-btn">Show All Content</button>
+    </div>
+  </div>
+</div>
 
 <script src="data.js"></script>
 <script src="app.js"></script>
