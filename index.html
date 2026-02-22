@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Google TV</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="loading-screen">
+  <div class="loader-logo">
+    <span>Fetching Shows &amp; Movies</span>
+  </div>
+  <div class="loader-spinner"></div>
+  <div id="loader-error" class="loader-error"></div>
+</div>
+
+<!-- Splash / Hero overlay -->
+<div id="hero-overlay" class="hidden">
+  <button id="hero-back" class="hero-back-btn" title="Back">&#8592; Back</button>
+  <div id="hero-bg"></div>
+  <div id="hero-info">
+    <div id="hero-badge">Featured</div>
+    <div id="hero-title"></div>
+    <div id="hero-meta"></div>
+    <p id="hero-desc"></p>
+    <div class="hero-actions">
+      <button class="hero-btn primary" id="hero-play">&#9654; Play</button>
+      <button class="hero-btn" id="hero-watchlist">+ Watchlist</button>
+    </div>
+  </div>
+</div>
+
+<!-- Main App -->
+<div id="app">
+
+  <!-- Top Nav Bar -->
+  <nav id="topnav">
+    <ul id="nav-tabs">
+      <li class="nav-tab" data-tab="search"><i class="fas fa-magnifying-glass"></i> Search</li>
+      <li class="nav-tab active focused" data-tab="home">Home</li>
+      <li class="nav-tab" data-tab="live">Live</li>
+      <li class="nav-tab" data-tab="shop">Shop</li>
+      <li class="nav-tab" data-tab="discover">Discover</li>
+      <li class="nav-tab" data-tab="apps">Apps</li>
+    </ul>
+    <div id="nav-right">
+      <div class="nav-icon-btn" id="notif-btn" title="Notifications">
+        <i class="fas fa-bell"></i>
+        <span class="notif-badge">2</span>
+      </div>
+      <div class="nav-icon-btn" id="settings-btn" title="Settings">
+        <i class="fas fa-gear"></i>
+      </div>
+      <div class="avatar" title="Profile">L</div>
+      <div id="nav-clock"></div>
+    </div>
+  </nav>
+
+  <!-- Hero Banner -->
+  <div id="hero-banner" tabindex="-1">
+    <div id="banner-slides"></div>
+    <div id="banner-gradient"></div>
+    <div id="banner-content">
+      <div id="banner-badge"></div>
+      <h1 id="banner-title"></h1>
+      <p id="banner-meta"></p>
+      <p id="banner-desc"></p>
+      <div id="banner-actions">
+        <button class="banner-btn primary" id="banner-play">&#9654; Play</button>
+        <button class="banner-btn" id="banner-info">&#9432; More Info</button>
+      </div>
+    </div>
+    <button class="carousel-arrow left" id="carousel-prev"><i class="fas fa-chevron-left"></i></button>
+    <button class="carousel-arrow right" id="carousel-next"><i class="fas fa-chevron-right"></i></button>
+    <div id="carousel-dots"></div>
+  </div>
+
+  <!-- Content Rows -->
+  <div id="content-area">
+    <!-- Rows injected by JS -->
+  </div>
+
+</div>
+
+<!-- Notification Toast -->
+<div id="toast"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
