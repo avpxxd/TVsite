@@ -618,36 +618,45 @@
     buildRecommendedRowSkeleton();
 
     try {
-      // Sample up to 8 watchlist items as seeds
-      const seeds = [...tmdbAuth.watchlist].slice(0, 8).map(key => {
-        const [mediaType, ...rest] = key.split('-');
-        return { mediaType, id: rest.join('-') };
-      });
+      // Shuffle watchlist so we get different seeds on every load
+      const allSeeds = [...tmdbAuth.watchlist]
+        .map(key => {
+          const [mediaType, ...rest] = key.split('-');
+          return { mediaType, id: rest.join('-') };
+        })
+        .sort(() => Math.random() - 0.5);
 
-      // Fetch recommendations for each seed in parallel
+      const seeds = allSeeds.slice(0, 8);
+
+      // Fetch recommendations for each seed in parallel, random page for variety
       const results = await Promise.allSettled(
-        seeds.map(s => tmdbFetch(`/${s.mediaType}/${s.id}/recommendations`))
+        seeds.map(s => {
+          const page = Math.floor(Math.random() * 3) + 1;
+          return tmdbFetch(`/${s.mediaType}/${s.id}/recommendations`, `&page=${page}`);
+        })
       );
 
       const seen  = new Set();
       const items = [];
 
+      // Collect all valid candidates first, then shuffle before capping
       for (const res of results) {
         if (res.status !== 'fulfilled') continue;
         for (const r of (res.value.results || [])) {
           if (!r.id) continue;
           const mt  = r.media_type || (r.first_air_date !== undefined ? 'tv' : 'movie');
           const key = `${mt}-${r.id}`;
-          // Skip if already on watchlist, already in this list, or adult content
           if (tmdbAuth.watchlist.has(key)) continue;
           if (seen.has(key)) continue;
           if (r.adult) continue;
           seen.add(key);
           items.push(toCard({ ...r, media_type: mt }));
-          if (items.length >= 20) break;
         }
-        if (items.length >= 20) break;
       }
+
+      // Shuffle so the order is different each time, then take 20
+      items.sort(() => Math.random() - 0.5);
+      items.splice(20);
 
       const section = document.getElementById(REC_ROW_ID);
       if (!section) return; // tab changed while fetching
@@ -775,6 +784,7 @@
   }
 
   function rowLength(ri) {
+    if (ri === -1) return document.querySelectorAll(`#${REC_ROW_ID} .card`).length;
     return CONTENT.rows[ri]?.items.length ?? 0;
   }
 
@@ -958,7 +968,8 @@
     } else if (key === 'ArrowUp') {
       setNavFocus(state.navIndex);
     } else if (key === 'ArrowDown') {
-      moveFocusToCard(0, 0);
+      const hasRecRow = !!document.getElementById(REC_ROW_ID);
+      moveFocusToCard(hasRecRow ? -1 : 0, 0);
     } else if (key === 'Enter' || key === ' ') {
       if (state.bannerCol === 0) {
         const hero = CONTENT.heroes[carouselIndex];
@@ -990,27 +1001,39 @@
     const ci = state.colIndex;
     const maxCol = rowLength(ri) - 1;
     const maxRow = CONTENT.rows.length - 1;
+    const hasRecRow = !!document.getElementById(REC_ROW_ID);
 
     if (key === 'ArrowRight') {
       if (ci < maxCol) moveFocusToCard(ri, ci + 1);
     } else if (key === 'ArrowLeft') {
       if (ci > 0) moveFocusToCard(ri, ci - 1);
-      else if (ci === 0) setBannerFocus(0); // go back to banner on far left of row 0? or just stay
+      else if (ci === 0) setBannerFocus(0);
     } else if (key === 'ArrowDown') {
-      if (ri < maxRow) {
+      if (ri === -1) {
+        // rec row → first real row
+        moveFocusToCard(0, Math.min(ci, rowLength(0) - 1));
+      } else if (ri < maxRow) {
         const newCol = Math.min(ci, rowLength(ri + 1) - 1);
         moveFocusToCard(ri + 1, newCol);
       }
     } else if (key === 'ArrowUp') {
-      if (ri > 0) {
+      if (ri === 0 && hasRecRow) {
+        // first real row → rec row
+        moveFocusToCard(-1, Math.min(ci, rowLength(-1) - 1));
+      } else if (ri === 0 || ri === -1) {
+        setBannerFocus(1);
+      } else {
         const newCol = Math.min(ci, rowLength(ri - 1) - 1);
         moveFocusToCard(ri - 1, newCol);
-      } else {
-        setBannerFocus(1);
       }
     } else if (key === 'Enter' || key === ' ') {
-      const item = CONTENT.rows[ri]?.items[ci];
-      if (item) openOverlay(item);
+      if (ri === -1) {
+        // rec row cards have a direct click listener
+        getCard(-1, ci)?.click();
+      } else {
+        const item = CONTENT.rows[ri]?.items[ci];
+        if (item) openOverlay(item);
+      }
     } else if (key === 'Escape' || key === 'Backspace') {
       setBannerFocus(0);
     }
