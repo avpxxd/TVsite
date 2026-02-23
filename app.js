@@ -15,6 +15,7 @@
     overlaySection: 'actions', // 'trailer' | 'actions' | 'providers'
     overlayCol: 0,
     settingsPanelOpen: false,
+    notifPanelOpen: false,
     settings: { region: 'US', providers: [] },
   };
 
@@ -111,6 +112,7 @@
     setupMouseListeners();
     setupHeroOverlay();
     setupSettingsPanel();
+    setupNotifPanel();
     setupSearchKeyboard();
     startClock();
   }
@@ -436,6 +438,11 @@
 
   // ── Keyboard Navigation ────────────────────────────────
   function onKeyDown(e) {
+    if (state.notifPanelOpen) {
+      if (e.key === 'Escape') { e.preventDefault(); closeNotifPanel(); }
+      return;
+    }
+
     if (state.settingsPanelOpen) {
       handleSettingsKeys(e);
       return;
@@ -495,7 +502,7 @@
       if (state.navIndex <= 5) {
         activateTab(state.navIndex);
       } else if (state.navIndex === 6) {
-        showToast('🔔 No new notifications');
+        openNotifPanel();
       } else if (state.navIndex === 7) {
         openSettings();
       } else if (state.navIndex === 8) {
@@ -1394,7 +1401,7 @@
     const profileBtn  = document.getElementById('profile-btn');
 
     notifBtn.addEventListener('mouseenter',    () => setNavFocus(6));
-    notifBtn.addEventListener('click',         () => showToast('🔔 No new notifications'));
+    notifBtn.addEventListener('click',         () => openNotifPanel());
     settingsBtn.addEventListener('mouseenter', () => setNavFocus(7));
     settingsBtn.addEventListener('click',      () => openSettings());
     profileBtn.addEventListener('mouseenter',  () => setNavFocus(8));
@@ -1418,11 +1425,41 @@
     toastTimer = setTimeout(() => $toast.classList.remove('show'), 2500);
   }
   // ── Settings keyboard navigation ─────────────────────────
+  const COUNTRIES = [
+    { code: 'CA', label: '🇨🇦 Canada' },
+    { code: 'GB', label: '🇬🇧 United Kingdom' },
+    { code: 'US', label: '🇺🇸 United States' },
+  ];
+  let countryIdx = COUNTRIES.findIndex(c => c.code === 'US');
+
+  function getCountryCode() {
+    return COUNTRIES[countryIdx].code;
+  }
+
+  function setCountryByCode(code) {
+    const idx = COUNTRIES.findIndex(c => c.code === code);
+    countryIdx = idx >= 0 ? idx : 0;
+    document.getElementById('country-label').textContent = COUNTRIES[countryIdx].label;
+  }
+
+  function stepCountry(dir) {
+    countryIdx = (countryIdx + dir + COUNTRIES.length) % COUNTRIES.length;
+    const label = document.getElementById('country-label');
+    label.textContent = COUNTRIES[countryIdx].label;
+    // brief pop animation
+    label.style.transition = 'none';
+    label.style.opacity = '0.4';
+    requestAnimationFrame(() => {
+      label.style.transition = 'opacity 0.15s';
+      label.style.opacity = '1';
+    });
+  }
+
   let settingsFocusIdx = 0;
 
   function getSettingsFocusItems() {
     return [
-      document.getElementById('settings-country'),
+      document.getElementById('settings-country-picker'),
       ...document.querySelectorAll('#settings-provider-grid .svc-chip'),
       document.getElementById('settings-apply-btn'),
       document.getElementById('settings-clear-btn'),
@@ -1469,25 +1506,21 @@
     if (key === 'ArrowRight') {
       e.preventDefault();
       if (isSelect) {
-        const sel = items[0];
-        if (sel.selectedIndex < sel.options.length - 1) sel.selectedIndex++;
+        stepCountry(1);
       } else {
         setSettingsFocus(Math.min(settingsFocusIdx + 1, items.length - 1));
       }
     } else if (key === 'ArrowLeft') {
       e.preventDefault();
       if (isSelect) {
-        const sel = items[0];
-        if (sel.selectedIndex > 0) sel.selectedIndex--;
+        stepCountry(-1);
       } else {
         setSettingsFocus(Math.max(settingsFocusIdx - 1, 0));
       }
     } else if (key === 'ArrowDown') {
       e.preventDefault();
       if (isSelect) {
-        const sel = items[0];
-        if (sel.selectedIndex < sel.options.length - 1) { sel.selectedIndex++; }
-        else { setSettingsFocus(chipsStart); }
+        setSettingsFocus(chipsStart);
       } else if (inChips) {
         const perRow = getChipsPerRow();
         const nextIdx = settingsFocusIdx + perRow;
@@ -1498,8 +1531,7 @@
     } else if (key === 'ArrowUp') {
       e.preventDefault();
       if (isSelect) {
-        const sel = items[0];
-        if (sel.selectedIndex > 0) sel.selectedIndex--;
+        // already at top, nowhere to go
       } else if (inChips) {
         const perRow = getChipsPerRow();
         const prevIdx = settingsFocusIdx - perRow;
@@ -1514,11 +1546,33 @@
     }
   }
 
+  // ── Notifications / Tips Panel ──────────────────────────
+  function openNotifPanel() {
+    state.notifPanelOpen = true;
+    document.getElementById('notif-panel').classList.remove('hidden');
+    // Stop the ring animation and hide the badge once the user opens the panel
+    const bell = document.querySelector('.bell-ring');
+    if (bell) bell.style.animation = 'none';
+    const badge = document.querySelector('.notif-badge');
+    if (badge) badge.style.opacity = '0';
+  }
+
+  function closeNotifPanel() {
+    state.notifPanelOpen = false;
+    document.getElementById('notif-panel').classList.add('hidden');
+    setNavFocus(6);
+  }
+
+  function setupNotifPanel() {
+    document.getElementById('notif-close').addEventListener('click', closeNotifPanel);
+    document.getElementById('notif-backdrop').addEventListener('click', closeNotifPanel);
+  }
+
   // ── Settings Panel ───────────────────────────────────────
   function openSettings() {
     state.settingsPanelOpen = true;
     document.getElementById('settings-panel').classList.remove('hidden');
-    document.getElementById('settings-country').value = state.settings.region;
+    setCountryByCode(state.settings.region);
     renderProviderChips();
     settingsFocusIdx = 0;
     requestAnimationFrame(() => setSettingsFocus(0));
@@ -1544,7 +1598,7 @@
   }
 
   async function applySettings() {
-    const region   = document.getElementById('settings-country').value;
+    const region   = getCountryCode();
     const selected = [...document.querySelectorAll('.svc-chip.selected')].map(b => parseInt(b.dataset.id));
 
     state.settings.region    = region;
@@ -1579,6 +1633,8 @@
     document.getElementById('settings-close').addEventListener('click', closeSettings);
     document.getElementById('settings-backdrop').addEventListener('click', closeSettings);
     document.getElementById('settings-apply-btn').addEventListener('click', applySettings);
+    document.getElementById('country-prev').addEventListener('click', () => stepCountry(-1));
+    document.getElementById('country-next').addEventListener('click', () => stepCountry(1));
     document.getElementById('settings-clear-btn').addEventListener('click', () => {
       document.querySelectorAll('.svc-chip').forEach(c => c.classList.remove('selected'));
       applySettings();

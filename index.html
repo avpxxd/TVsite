@@ -81,8 +81,8 @@
     </ul>
     <div id="nav-right">
       <div class="nav-icon-btn" id="notif-btn" title="Notifications">
-        <i class="fas fa-bell"></i>
-        <span class="notif-badge">2</span>
+        <span class="bell-ring"><i class="fas fa-bell"></i></span>
+        <span class="notif-badge">!</span>
       </div>
       <div class="nav-icon-btn" id="settings-btn" title="Settings">
         <i class="fas fa-gear"></i>
@@ -187,6 +187,70 @@
 <div id="toast"></div>
 
 
+<!-- Notifications / Tips Panel -->
+<div id="notif-panel" class="hidden">
+  <div id="notif-backdrop"></div>
+  <div id="notif-drawer">
+    <div id="notif-header">
+      <span><i class="fas fa-bell"></i> Tips &amp; Tricks</span>
+      <button id="notif-close" title="Close">&#10005;</button>
+    </div>
+    <div id="notif-body">
+
+      <div class="tip-card">
+        <div class="tip-icon-wrap">
+          <img src="https://static.thenounproject.com/png/302301-200.png" alt="Arrow keys" class="tip-arrow-img" />
+        </div>
+        <div class="tip-content">
+          <div class="tip-title">Keyboard Navigation</div>
+          <p class="tip-desc">Use the <strong>arrow keys</strong> to move through menus, rows, and cards. Press <strong>Enter</strong> to open anything, and <strong>Esc</strong> to go back.</p>
+        </div>
+      </div>
+
+      <div class="tip-card">
+        <div class="tip-icon-wrap"><i class="fas fa-tv"></i></div>
+        <div class="tip-content">
+          <div class="tip-title">Open Detail View</div>
+          <p class="tip-desc">Click or press <strong>Enter</strong> on any title card to see its trailer, full cast, ratings, and exactly where to stream it.</p>
+        </div>
+      </div>
+
+      <div class="tip-card">
+        <div class="tip-icon-wrap"><i class="fas fa-gear"></i></div>
+        <div class="tip-content">
+          <div class="tip-title">Filter by Service</div>
+          <p class="tip-desc">Open <strong>Settings</strong> <i class="fas fa-gear" style="font-size:10px"></i> to choose your streaming subscriptions and region — the app will only show content you can actually watch.</p>
+        </div>
+      </div>
+
+      <div class="tip-card">
+        <div class="tip-icon-wrap"><i class="fas fa-magnifying-glass"></i></div>
+        <div class="tip-content">
+          <div class="tip-title">Search Anything</div>
+          <p class="tip-desc">Head to the <strong>Search</strong> tab to find movies and shows instantly. Type with the on-screen keyboard or just start typing on your physical keyboard.</p>
+        </div>
+      </div>
+
+      <div class="tip-card">
+        <div class="tip-icon-wrap"><i class="fas fa-film"></i></div>
+        <div class="tip-content">
+          <div class="tip-title">Browse by Category</div>
+          <p class="tip-desc">Switch between the <strong>Movies</strong> and <strong>Shows</strong> tabs for category rows tailored to each content type.</p>
+        </div>
+      </div>
+
+      <div class="tip-card">
+        <div class="tip-icon-wrap"><i class="fas fa-rotate"></i></div>
+        <div class="tip-content">
+          <div class="tip-title">Fresh Content Every Visit</div>
+          <p class="tip-desc">The home screen loads a <strong>different selection</strong> of trending and popular titles every time the app opens — there's always something new to discover.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
 <!-- Settings Panel -->
 <div id="settings-panel" class="hidden">
   <div id="settings-backdrop"></div>
@@ -200,11 +264,11 @@
       <div class="settings-section">
         <div class="settings-section-title">Country / Region</div>
         <p class="settings-section-desc">Affects where-to-watch availability and content recommendations</p>
-        <select id="settings-country">
-          <option value="CA">🇨🇦 Canada</option>
-          <option value="GB">🇬🇧 United Kingdom</option>
-          <option value="US">🇺🇸 United States</option>
-        </select>
+        <div id="settings-country-picker">
+          <button id="country-prev" class="country-nav-btn" title="Previous country">&#8249;</button>
+          <span id="country-label"></span>
+          <button id="country-next" class="country-nav-btn" title="Next country">&#8250;</button>
+        </div>
       </div>
 
       <div class="settings-section">
