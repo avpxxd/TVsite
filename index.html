@@ -43,6 +43,10 @@
       <div id="hero-meta"></div>
       <p id="hero-desc"></p>
 
+      <div class="hero-actions">
+        <button class="hero-btn" id="hero-watchlist"><i class="fas fa-plus"></i> Watchlist</button>
+      </div>
+
       <div id="hero-providers-section">
         <div class="overlay-section-label">Where to Watch</div>
         <div id="hero-providers"><div class="overlay-skeleton">Checking availability…</div></div>
@@ -58,9 +62,17 @@
         <div id="hero-cast"><div class="overlay-skeleton">Loading cast…</div></div>
       </div>
 
-      <div class="hero-actions">
-        <button class="hero-btn primary" id="hero-play">&#9654; Play</button>
-        <button class="hero-btn" id="hero-watchlist">+ Watchlist</button>
+      <div id="hero-rating-section">
+        <div class="overlay-section-label">Your Rating</div>
+        <div id="hero-stars">
+          <button class="star-btn" data-value="2">&#9733;</button>
+          <button class="star-btn" data-value="4">&#9733;</button>
+          <button class="star-btn" data-value="6">&#9733;</button>
+          <button class="star-btn" data-value="8">&#9733;</button>
+          <button class="star-btn" data-value="10">&#9733;</button>
+        </div>
+        <div id="hero-rating-label">Tap a star to rate</div>
+        <button id="hero-rating-clear" class="hidden">Remove rating</button>
       </div>
     </div>
   </div>
@@ -77,7 +89,7 @@
       <li class="nav-tab" data-tab="movies">Movies</li>
       <li class="nav-tab" data-tab="shows">Shows</li>
       <li class="nav-tab" data-tab="shop">Shop</li>
-      <li class="nav-tab" data-tab="apps">Apps</li>
+      <li class="nav-tab" data-tab="apps">My Library</li>
     </ul>
     <div id="nav-right">
       <div class="nav-icon-btn" id="notif-btn" title="Notifications">
@@ -87,7 +99,20 @@
       <div class="nav-icon-btn" id="settings-btn" title="Settings">
         <i class="fas fa-gear"></i>
       </div>
-      <div class="avatar" id="profile-btn" title="Profile">L</div>
+      <div id="profile-wrap">
+        <div class="avatar" id="profile-btn" title="Profile"></div>
+        <div id="profile-dropdown" class="hidden">
+          <div id="profile-dropdown-user" class="hidden">
+            <div id="profile-avatar-lg"></div>
+            <div id="profile-info">
+              <div id="profile-name"></div>
+              <div id="profile-username"></div>
+            </div>
+          </div>
+          <button id="tmdb-login-btn"><i class="fas fa-right-to-bracket"></i> Log in with TMDB</button>
+          <button id="tmdb-logout-btn" class="hidden"><i class="fas fa-right-from-bracket"></i> Log out</button>
+        </div>
+      </div>
       <div id="nav-clock"></div>
     </div>
   </nav>
@@ -198,6 +223,14 @@
     <div id="notif-body">
 
       <div class="tip-card">
+        <div class="tip-icon-wrap"><i class="fas fa-right-to-bracket" style="color:#01b4e4"></i></div>
+        <div class="tip-content">
+          <div class="tip-title">Sign In with TMDB</div>
+          <p class="tip-desc">Log in with your free <strong>TMDB account</strong> to unlock your personal <strong>Watchlist</strong>, rate titles with <strong>stars</strong>, and sync everything across devices.</p>
+        </div>
+      </div>
+
+      <div class="tip-card">
         <div class="tip-icon-wrap">
           <img src="https://static.thenounproject.com/png/302301-200.png" alt="Arrow keys" class="tip-arrow-img" />
         </div>
@@ -281,6 +314,46 @@
     <div id="settings-footer">
       <button id="settings-apply-btn">Apply Changes</button>
       <button id="settings-clear-btn">Show All Content</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shop Placeholder View -->
+<div id="shop-view" class="hidden">
+  <div id="shop-header">
+    <h2 id="shop-title">Shop</h2>
+  </div>
+  <div id="shop-empty">
+    <img id="shop-empty-img" src="https://cdn0.iconfinder.com/data/icons/shopping-ecommerce-8/24/bag-frown-face-sad-shopping-512.png" alt="Shop unavailable" />
+    <div id="shop-empty-heading">Shop Isn't Available Yet.</div>
+    <div id="shop-empty-sub">We're working on something great. Check back soon!</div>
+  </div>
+</div>
+
+<!-- My Library View -->
+<div id="library-view" class="hidden">
+  <div id="library-header">
+    <h2 id="library-title">My Library</h2>
+  </div>
+  <div id="library-empty">
+    <img id="library-empty-img" src="https://cdni.iconscout.com/illustration/premium/thumb/empty-wishlist-12057811-9824481.png" alt="Empty" />
+    <div id="library-empty-heading"></div>
+    <div id="library-empty-sub"></div>
+    <button id="library-login-btn" class="hidden"><i class="fas fa-right-to-bracket"></i> Log in with TMDB</button>
+  </div>
+  <div id="library-grid"></div>
+</div>
+
+<!-- TMDB Login Confirmation Modal -->
+<div id="tmdb-confirm-modal" class="hidden">
+  <div id="tmdb-confirm-backdrop"></div>
+  <div id="tmdb-confirm-box">
+    <div id="tmdb-confirm-icon"><i class="fas fa-right-to-bracket"></i></div>
+    <div id="tmdb-confirm-title">Approve on TMDB</div>
+    <p id="tmdb-confirm-desc">A TMDB login page has opened in a new tab.<br>Click <strong>Allow</strong> there, then come back here and press <strong>Continue</strong>.</p>
+    <div id="tmdb-confirm-btns">
+      <button id="tmdb-confirm-ok">Continue &rarr;</button>
+      <button id="tmdb-confirm-cancel">Cancel</button>
     </div>
   </div>
 </div>

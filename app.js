@@ -4,23 +4,288 @@
 
   // ── State ──────────────────────────────────────────────
   const state = {
-    activeTab: 'home',       // current tab
-    focusZone: 'nav',        // 'nav' | 'banner' | 'content'
-    navIndex: 1,             // 0=Search,1=Home,2=Movies,3=Shows,4=Shop,5=Apps
-    bannerCol: 0,            // 0=Play, 1=More Info
-    rowIndex: 0,             // current row in content
-    colIndex: 0,             // current col in row
+    activeTab: 'home',
+    focusZone: 'nav',
+    navIndex: 1,
+    bannerCol: 0,
+    rowIndex: 0,
+    colIndex: 0,
     overlayOpen: false,
     overlayItem: null,
-    overlaySection: 'actions', // 'trailer' | 'actions' | 'providers'
+    overlaySection: 'actions',
     overlayCol: 0,
     settingsPanelOpen: false,
     notifPanelOpen: false,
+    profileDropdownOpen: false,
+    tmdbConfirmModalOpen: false,
     settings: { region: 'US', providers: [] },
   };
 
+  // ── TMDB Auth ────────────────────────────────────────────
+  const tmdbAuth = {
+    sessionId:   null,
+    accountId:   null,
+    accountName: null,
+    username:    null,
+    watchlist:   new Set(), // set of `${mediaType}-${id}` keys
+    ratings:     {},        // key -> score (1-10)
+  };
+
+  async function tmdbAuthFetch(endpoint, method = 'GET', body = null) {
+    const url = `${TMDB_BASE}${endpoint}?api_key=${TMDB_KEY}&session_id=${tmdbAuth.sessionId}`;
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(url, opts);
+    return res.json();
+  }
+
+  let _pendingTmdbToken = null;
+
+  async function tmdbLogin() {
+    try {
+      const data = await tmdbFetch('/authentication/token/new');
+      _pendingTmdbToken = data.request_token;
+      // Open TMDB auth in a new tab — no redirect URL needed
+      window.open(`https://www.themoviedb.org/authenticate/${_pendingTmdbToken}`, '_blank');
+      // Show the confirmation modal
+      state.tmdbConfirmModalOpen = true;
+      document.getElementById('tmdb-confirm-modal').classList.remove('hidden');
+      requestAnimationFrame(() => setTmdbConfirmFocus(0));
+      closeProfileDropdown();
+    } catch(e) {
+      showToast('⚠ Could not reach TMDB auth');
+    }
+  }
+
+  async function tmdbConfirmLogin() {
+    state.tmdbConfirmModalOpen = false;
+    document.getElementById('tmdb-confirm-modal').classList.add('hidden');
+    if (!_pendingTmdbToken) { showToast('⚠ No pending login'); return; }
+    await tmdbCreateSession(_pendingTmdbToken);
+    _pendingTmdbToken = null;
+  }
+
+  function tmdbCancelLogin() {
+    _pendingTmdbToken = null;
+    state.tmdbConfirmModalOpen = false;
+    document.getElementById('tmdb-confirm-modal').classList.add('hidden');
+  }
+
+  async function tmdbCreateSession(requestToken) {
+    try {
+      const url = `${TMDB_BASE}/authentication/session/new?api_key=${TMDB_KEY}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_token: requestToken }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        tmdbAuth.sessionId = data.session_id;
+        localStorage.setItem('tmdb_session', data.session_id);
+        await tmdbLoadAccount();
+        // Clean URL
+        window.history.replaceState({}, '', window.location.pathname);
+      } else {
+        showToast('⚠ TMDB login failed');
+      }
+    } catch(e) {
+      showToast('⚠ TMDB session error');
+    }
+  }
+
+  async function tmdbLoadAccount() {
+    try {
+      const data = await tmdbAuthFetch('/account');
+      tmdbAuth.accountId   = data.id;
+      tmdbAuth.accountName = data.name || data.username;
+      tmdbAuth.username    = data.username;
+      updateProfileUI();
+      await tmdbLoadWatchlist();
+      await tmdbLoadRatings();
+      showToast(`✓ Logged in as ${tmdbAuth.accountName}`);
+      buildRecommendedRow();
+    } catch(e) {
+      console.warn('Could not load TMDB account:', e);
+    }
+  }
+
+  async function tmdbLoadWatchlist() {
+    try {
+      const [mv, tv] = await Promise.all([
+        tmdbAuthFetch(`/account/${tmdbAuth.accountId}/watchlist/movies`),
+        tmdbAuthFetch(`/account/${tmdbAuth.accountId}/watchlist/tv`),
+      ]);
+      tmdbAuth.watchlist.clear();
+      (mv.results || []).forEach(m => tmdbAuth.watchlist.add(`movie-${m.id}`));
+      (tv.results || []).forEach(t => tmdbAuth.watchlist.add(`tv-${t.id}`));
+    } catch(e) {}
+  }
+
+  async function tmdbLoadRatings() {
+    try {
+      const [mv, tv] = await Promise.all([
+        tmdbAuthFetch(`/account/${tmdbAuth.accountId}/rated/movies`),
+        tmdbAuthFetch(`/account/${tmdbAuth.accountId}/rated/tv`),
+      ]);
+      tmdbAuth.ratings = {};
+      (mv.results || []).forEach(m => { tmdbAuth.ratings[`movie-${m.id}`] = m.rating; });
+      (tv.results || []).forEach(t => { tmdbAuth.ratings[`tv-${t.id}`]    = t.rating; });
+    } catch(e) {}
+  }
+
+  async function tmdbToggleWatchlist(item) {
+    if (!tmdbAuth.sessionId) {
+      showToast('🔒 Log in with TMDB to use Watchlist');
+      return;
+    }
+    const key = `${item.mediaType}-${item.id}`;
+    const add = !tmdbAuth.watchlist.has(key);
+    try {
+      await tmdbAuthFetch(`/account/${tmdbAuth.accountId}/watchlist`, 'POST', {
+        media_type: item.mediaType,
+        media_id:   item.id,
+        watchlist:  add,
+      });
+      if (add) tmdbAuth.watchlist.add(key);
+      else     tmdbAuth.watchlist.delete(key);
+      updateWatchlistBtn(item);
+      showToast(add ? `✓ Added to Watchlist` : `✓ Removed from Watchlist`);
+      // Refresh recommendations on the home tab
+      buildRecommendedRow();
+    } catch(e) {
+      showToast('⚠ Watchlist update failed');
+    }
+  }
+
+  async function tmdbRateItem(item, score) {
+    if (!tmdbAuth.sessionId) {
+      showToast('🔒 Log in with TMDB to rate titles');
+      return;
+    }
+    const key = `${item.mediaType}-${item.id}`;
+    try {
+      if (score === 0) {
+        await tmdbAuthFetch(`/${item.mediaType}/${item.id}/rating`, 'DELETE');
+        delete tmdbAuth.ratings[key];
+        showToast('✓ Rating removed');
+      } else {
+        await tmdbAuthFetch(`/${item.mediaType}/${item.id}/rating`, 'POST', { value: score });
+        tmdbAuth.ratings[key] = score;
+        showToast(`✓ Rated ${score}/10`);
+      }
+      updateStarsUI(item);
+    } catch(e) {
+      showToast('⚠ Rating failed');
+    }
+  }
+
+  function tmdbLogout() {
+    tmdbAuth.sessionId   = null;
+    tmdbAuth.accountId   = null;
+    tmdbAuth.accountName = null;
+    tmdbAuth.username    = null;
+    tmdbAuth.watchlist.clear();
+    tmdbAuth.ratings = {};
+    localStorage.removeItem('tmdb_session');
+    updateProfileUI();
+    closeProfileDropdown();
+    showToast('👋 Logged out of TMDB');
+    document.getElementById('rec-row-section')?.remove();
+  }
+
+  const AVATAR_COLORS = [
+    'linear-gradient(135deg,#e53935,#ff6b6b)',   // red
+    'linear-gradient(135deg,#e8710a,#ffab40)',   // orange
+    'linear-gradient(135deg,#f9a825,#ffee58)',   // yellow
+    'linear-gradient(135deg,#2e7d32,#66bb6a)',   // green
+    'linear-gradient(135deg,#00838f,#4dd0e1)',   // cyan
+    'linear-gradient(135deg,#1565c0,#42a5f5)',   // blue
+    'linear-gradient(135deg,#6a1b9a,#ce93d8)',   // purple
+    'linear-gradient(135deg,#c2185b,#f48fb1)',   // pink
+  ];
+  let _avatarColor = null;
+
+  function updateProfileUI() {
+    const loggedIn = !!tmdbAuth.sessionId;
+    const $btn     = document.getElementById('profile-btn');
+    const $userRow = document.getElementById('profile-dropdown-user');
+    const $loginBtn  = document.getElementById('tmdb-login-btn');
+    const $logoutBtn = document.getElementById('tmdb-logout-btn');
+    const $avatarLg  = document.getElementById('profile-avatar-lg');
+    const $name      = document.getElementById('profile-name');
+    const $uname     = document.getElementById('profile-username');
+
+    if (loggedIn) {
+      // Pick a random color once per session
+      if (!_avatarColor) {
+        _avatarColor = AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
+      }
+      const initials = (tmdbAuth.accountName || tmdbAuth.username || '?').slice(0,2).toUpperCase();
+      $btn.textContent = initials;
+      $btn.style.background = _avatarColor;
+      $avatarLg.textContent = initials;
+      $avatarLg.style.background = _avatarColor;
+      $name.textContent  = tmdbAuth.accountName || tmdbAuth.username;
+      $uname.textContent = '@' + (tmdbAuth.username || '');
+      $userRow.classList.remove('hidden');
+      $loginBtn.classList.add('hidden');
+      $logoutBtn.classList.remove('hidden');
+    } else {
+      _avatarColor = null;
+      $btn.textContent = '';
+      $btn.style.background = '#3a3a3a';
+      $userRow.classList.add('hidden');
+      $loginBtn.classList.remove('hidden');
+      $logoutBtn.classList.add('hidden');
+    }
+  }
+
+  function updateWatchlistBtn(item) {
+    const inList = item && tmdbAuth.watchlist.has(`${item.mediaType}-${item.id}`);
+    $heroWatchlist.classList.toggle('in-list', inList);
+    $heroWatchlist.innerHTML = inList
+      ? '<i class="fas fa-check"></i> In Watchlist'
+      : '<i class="fas fa-plus"></i> Watchlist';
+  }
+
+  function updateStarsUI(item) {
+    const key    = item ? `${item.mediaType}-${item.id}` : null;
+    const score  = key ? (tmdbAuth.ratings[key] || 0) : 0;
+    const stars  = document.querySelectorAll('.star-btn');
+    const $label = document.getElementById('hero-rating-label');
+    const $clear = document.getElementById('hero-rating-clear');
+    stars.forEach(s => {
+      const v = parseInt(s.dataset.value);
+      s.classList.toggle('rated', score > 0 && v <= score);
+    });
+    if (score > 0) {
+      $label.textContent = `Your rating: ${score}/10`;
+      $clear.classList.remove('hidden');
+    } else {
+      $label.textContent = tmdbAuth.sessionId ? 'Tap a star to rate' : 'Log in to rate';
+      $clear.classList.add('hidden');
+    }
+  }
+
+  function openProfileDropdown() {
+    state.profileDropdownOpen = true;
+    document.getElementById('profile-dropdown').classList.remove('hidden');
+    requestAnimationFrame(() => setProfileDropdownFocus(0));
+  }
+
+  function closeProfileDropdown() {
+    state.profileDropdownOpen = false;
+    document.getElementById('profile-dropdown').classList.add('hidden');
+  }
+
+  function toggleProfileDropdown() {
+    if (state.profileDropdownOpen) closeProfileDropdown();
+    else openProfileDropdown();
+  }
+
   // Nav tabs order
-  const NAV_TABS = ['search', 'home', 'movies', 'shows', 'shop', 'apps'];
+  const NAV_TABS = ['search', 'home', 'movies', 'shows', 'shop', 'library'];
 
   // Streaming provider search URLs keyed by TMDB provider_id
   const PROVIDER_URLS = {
@@ -56,7 +321,6 @@
   const $heroTitle     = document.getElementById('hero-title');
   const $heroMeta      = document.getElementById('hero-meta');
   const $heroDesc      = document.getElementById('hero-desc');
-  const $heroPlay      = document.getElementById('hero-play');
   const $heroWatchlist = document.getElementById('hero-watchlist');
   const $toast         = document.getElementById('toast');
 
@@ -81,6 +345,15 @@
         state.settings.providers = parsed.providers || [];
       }
     } catch (e) {}
+
+    // Handle TMDB auth callback — restore saved session on page load
+    try {
+      const savedSession = localStorage.getItem('tmdb_session');
+      if (savedSession) {
+        tmdbAuth.sessionId = savedSession;
+        await tmdbLoadAccount();
+      }
+    } catch(e) {}
 
     try {
       if (TMDB_KEY && TMDB_KEY !== 'YOUR_TMDB_API_KEY_HERE') {
@@ -218,6 +491,8 @@
   // ── Build rows ─────────────────────────────────────────
   function buildRows() {
     $contentArea.innerHTML = '';
+    // Kick off Recommended For You row asynchronously (home tab only)
+    buildRecommendedRow();
     CONTENT.rows.forEach((row, ri) => {
       const section = document.createElement('div');
       section.className = 'row-section';
@@ -281,6 +556,145 @@
       section.appendChild(rowWrap);
       $contentArea.appendChild(section);
     });
+  }
+
+  // ── Recommended For You row ─────────────────────────────────────────────
+  const REC_ROW_ID = 'rec-row-section';
+
+  function buildRecommendedRowSkeleton() {
+    // Only show on home tab
+    if (state.activeTab !== 'home') return;
+
+    // Remove any existing rec row
+    document.getElementById(REC_ROW_ID)?.remove();
+
+    // Not logged in or no watchlist → stay hidden
+    if (!tmdbAuth.sessionId || tmdbAuth.watchlist.size === 0) return;
+
+    const section = document.createElement('div');
+    section.className = 'row-section';
+    section.id = REC_ROW_ID;
+
+    const labelRow = document.createElement('div');
+    labelRow.className = 'row-label-row';
+    const label = document.createElement('div');
+    label.className = 'row-label';
+    label.innerHTML = '<i class="fas fa-wand-magic-sparkles" style="color:#a78bfa;margin-right:8px;font-size:16px"></i>Recommended For You';
+    labelRow.appendChild(label);
+
+    const scroller = document.createElement('div');
+    scroller.className = 'row-scroller';
+    const track = document.createElement('div');
+    track.className = 'row-track rec-row-track';
+
+    // Skeleton placeholders
+    for (let i = 0; i < 8; i++) {
+      const skel = document.createElement('div');
+      skel.className = 'card rec-skeleton';
+      track.appendChild(skel);
+    }
+
+    const rowWrap = document.createElement('div');
+    rowWrap.className = 'row-wrap';
+    rowWrap.appendChild(scroller);
+    scroller.appendChild(track);
+
+    section.appendChild(labelRow);
+    section.appendChild(rowWrap);
+
+    // Insert as the very first child of content-area
+    $contentArea.insertBefore(section, $contentArea.firstChild);
+  }
+
+  async function buildRecommendedRow() {
+    // Only on home tab
+    if (state.activeTab !== 'home') return;
+    if (!tmdbAuth.sessionId || tmdbAuth.watchlist.size === 0) {
+      document.getElementById(REC_ROW_ID)?.remove();
+      return;
+    }
+
+    // Show skeleton first
+    buildRecommendedRowSkeleton();
+
+    try {
+      // Sample up to 8 watchlist items as seeds
+      const seeds = [...tmdbAuth.watchlist].slice(0, 8).map(key => {
+        const [mediaType, ...rest] = key.split('-');
+        return { mediaType, id: rest.join('-') };
+      });
+
+      // Fetch recommendations for each seed in parallel
+      const results = await Promise.allSettled(
+        seeds.map(s => tmdbFetch(`/${s.mediaType}/${s.id}/recommendations`))
+      );
+
+      const seen  = new Set();
+      const items = [];
+
+      for (const res of results) {
+        if (res.status !== 'fulfilled') continue;
+        for (const r of (res.value.results || [])) {
+          if (!r.id) continue;
+          const mt  = r.media_type || (r.first_air_date !== undefined ? 'tv' : 'movie');
+          const key = `${mt}-${r.id}`;
+          // Skip if already on watchlist, already in this list, or adult content
+          if (tmdbAuth.watchlist.has(key)) continue;
+          if (seen.has(key)) continue;
+          if (r.adult) continue;
+          seen.add(key);
+          items.push(toCard({ ...r, media_type: mt }));
+          if (items.length >= 20) break;
+        }
+        if (items.length >= 20) break;
+      }
+
+      const section = document.getElementById(REC_ROW_ID);
+      if (!section) return; // tab changed while fetching
+
+      if (!items.length) {
+        section.remove();
+        return;
+      }
+
+      // Replace skeleton track with real cards
+      const track = section.querySelector('.rec-row-track');
+      if (!track) return;
+      track.innerHTML = '';
+      items.forEach((item, ci) => {
+        const card = createCard(item, -1, ci, false);
+        card.addEventListener('click', () => openOverlay(item));
+        track.appendChild(card);
+      });
+
+      // Wire up nav arrows now that cards are present
+      const scroller  = section.querySelector('.row-scroller');
+      const rowWrap   = section.querySelector('.row-wrap');
+      const btnPrev   = document.createElement('button');
+      btnPrev.className = 'row-nav-btn row-nav-prev';
+      btnPrev.innerHTML = '<i class="fas fa-chevron-left"></i>';
+      btnPrev.setAttribute('aria-label', 'Scroll left');
+      const btnNext   = document.createElement('button');
+      btnNext.className = 'row-nav-btn row-nav-next';
+      btnNext.innerHTML = '<i class="fas fa-chevron-right"></i>';
+      btnNext.setAttribute('aria-label', 'Scroll right');
+      const scrollAmt = () => scroller.clientWidth * 0.75;
+      btnPrev.addEventListener('click', () => scroller.scrollBy({ left: -scrollAmt(), behavior: 'smooth' }));
+      btnNext.addEventListener('click', () => scroller.scrollBy({ left:  scrollAmt(), behavior: 'smooth' }));
+      function syncArrows() {
+        const atStart = scroller.scrollLeft <= 4;
+        const atEnd   = scroller.scrollLeft >= scroller.scrollWidth - scroller.clientWidth - 4;
+        btnPrev.classList.toggle('hidden', atStart);
+        btnNext.classList.toggle('hidden', atEnd);
+      }
+      scroller.addEventListener('scroll', syncArrows, { passive: true });
+      rowWrap.insertBefore(btnPrev, scroller);
+      rowWrap.appendChild(btnNext);
+      requestAnimationFrame(syncArrows);
+
+    } catch(e) {
+      document.getElementById(REC_ROW_ID)?.remove();
+    }
   }
 
   function createCard(item, ri, ci, wide) {
@@ -448,6 +862,16 @@
       return;
     }
 
+    if (state.tmdbConfirmModalOpen) {
+      handleTmdbConfirmKeys(e);
+      return;
+    }
+
+    if (state.profileDropdownOpen) {
+      handleProfileDropdownKeys(e);
+      return;
+    }
+
     if (state.overlayOpen) {
       handleOverlayKeys(e);
       return;
@@ -470,7 +894,8 @@
     }
 
     if (key === 'Escape') {
-      if (state.focusZone !== 'search') return; // do nothing on main non-search screen
+      if (state.focusZone === 'library') { setNavFocus(state.navIndex); return; }
+      if (state.focusZone !== 'search') return;
     }
 
     if (state.focusZone === 'search') {
@@ -481,6 +906,8 @@
       handleBannerKeys(key);
     } else if (state.focusZone === 'content') {
       handleContentKeys(key);
+    } else if (state.focusZone === 'library') {
+      handleLibraryKeys(key);
     }
   }
 
@@ -497,6 +924,10 @@
         document.getElementById('search-input-wrap').classList.add('active');
         return;
       }
+      if (state.activeTab === 'library') {
+        setLibraryFocus(0);
+        return;
+      }
       if (state.navIndex <= 5) setBannerFocus(0);
     } else if (key === 'Enter' || key === ' ') {
       if (state.navIndex <= 5) {
@@ -506,7 +937,7 @@
       } else if (state.navIndex === 7) {
         openSettings();
       } else if (state.navIndex === 8) {
-        showToast('👤 Profile');
+        toggleProfileDropdown();
       }
     }
   }
@@ -530,7 +961,24 @@
       moveFocusToCard(0, 0);
     } else if (key === 'Enter' || key === ' ') {
       if (state.bannerCol === 0) {
-        showToast('▶ Playing ' + CONTENT.heroes[carouselIndex].title);
+        const hero = CONTENT.heroes[carouselIndex];
+        if (!hero) return;
+        const mediaType = hero.mediaType || hero.media_type || 'movie';
+        const win = window.open('', '_blank');
+        if (!win) { showToast('Allow popups to watch the trailer'); return; }
+        tmdbFetch(`/${mediaType}/${hero.id}/videos`).then(data => {
+          const vids = data.results || [];
+          const trailer =
+            vids.find(v => v.type === 'Trailer' && v.site === 'YouTube') ||
+            vids.find(v => v.type === 'Teaser'  && v.site === 'YouTube') ||
+            vids.find(v => v.site === 'YouTube');
+          if (trailer) {
+            win.location.href = `https://www.youtube.com/watch?v=${trailer.key}`;
+          } else {
+            win.close();
+            showToast('No trailer available');
+          }
+        }).catch(() => { win.close(); showToast('Could not load trailer'); });
       } else {
         openOverlayFromHero();
       }
@@ -568,6 +1016,120 @@
     }
   }
 
+  // ── TMDB Confirm Modal keyboard nav ────────────────────────────────────────
+  let tmdbConfirmFocusIdx = 0;
+
+  function getTmdbConfirmBtns() {
+    return [
+      document.getElementById('tmdb-confirm-ok'),
+      document.getElementById('tmdb-confirm-cancel'),
+    ];
+  }
+
+  function setTmdbConfirmFocus(idx) {
+    const btns = getTmdbConfirmBtns();
+    tmdbConfirmFocusIdx = Math.max(0, Math.min(idx, btns.length - 1));
+    btns.forEach(b => b.classList.remove('confirm-btn-focused'));
+    btns[tmdbConfirmFocusIdx]?.classList.add('confirm-btn-focused');
+    btns[tmdbConfirmFocusIdx]?.focus();
+  }
+
+  function handleTmdbConfirmKeys(e) {
+    const key = e.key;
+    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter',' ','Escape','Tab'].includes(key)) e.preventDefault();
+    if (key === 'Escape') { tmdbCancelLogin(); return; }
+    const btns = getTmdbConfirmBtns();
+    if (key === 'ArrowRight' || key === 'ArrowDown') {
+      setTmdbConfirmFocus(Math.min(tmdbConfirmFocusIdx + 1, btns.length - 1));
+    } else if (key === 'ArrowLeft' || key === 'ArrowUp') {
+      setTmdbConfirmFocus(Math.max(tmdbConfirmFocusIdx - 1, 0));
+    } else if (key === 'Enter' || key === ' ') {
+      btns[tmdbConfirmFocusIdx]?.click();
+    }
+  }
+
+  // ── Library keyboard nav ───────────────────────────────
+  let libraryFocusIdx = 0;
+
+  function getLibraryCards() {
+    return [...document.querySelectorAll('#library-grid .card')];
+  }
+
+  function setLibraryFocus(idx) {
+    const cards = getLibraryCards();
+    if (!cards.length) return;
+    libraryFocusIdx = Math.max(0, Math.min(idx, cards.length - 1));
+    state.focusZone = 'library';
+    cards.forEach(c => c.classList.remove('focused'));
+    const card = cards[libraryFocusIdx];
+    card.classList.add('focused');
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function getLibraryColsPerRow() {
+    const cards = getLibraryCards();
+    if (cards.length < 2) return 1;
+    const firstTop = cards[0].getBoundingClientRect().top;
+    let count = 0;
+    for (const c of cards) {
+      if (Math.abs(c.getBoundingClientRect().top - firstTop) < 4) count++;
+      else break;
+    }
+    return count || 1;
+  }
+
+  function handleLibraryKeys(key) {
+    const cards = getLibraryCards();
+    if (!cards.length) {
+      if (key === 'Escape') setNavFocus(state.navIndex);
+      return;
+    }
+    const cols = getLibraryColsPerRow();
+    const max  = cards.length - 1;
+
+    if (key === 'ArrowRight') {
+      if (libraryFocusIdx < max) setLibraryFocus(libraryFocusIdx + 1);
+    } else if (key === 'ArrowLeft') {
+      if (libraryFocusIdx > 0) setLibraryFocus(libraryFocusIdx - 1);
+    } else if (key === 'ArrowDown') {
+      const next = libraryFocusIdx + cols;
+      if (next <= max) setLibraryFocus(next);
+    } else if (key === 'ArrowUp') {
+      const prev = libraryFocusIdx - cols;
+      if (prev >= 0) setLibraryFocus(prev);
+      else setNavFocus(state.navIndex);
+    } else if (key === 'Enter' || key === ' ') {
+      cards[libraryFocusIdx]?.click();
+    } else if (key === 'Escape') {
+      setNavFocus(state.navIndex);
+    }
+  }
+
+  // ── Profile dropdown keyboard nav ────────────────────
+  let profileFocusIdx = 0;
+
+  function getProfileDropdownBtns() {
+    return [...document.querySelectorAll('#profile-dropdown button:not(.hidden)')];
+  }
+
+  function setProfileDropdownFocus(idx) {
+    const btns = getProfileDropdownBtns();
+    profileFocusIdx = Math.max(0, Math.min(idx, btns.length - 1));
+    btns.forEach(b => b.classList.remove('profile-dd-focused'));
+    btns[profileFocusIdx]?.classList.add('profile-dd-focused');
+    btns[profileFocusIdx]?.focus();
+  }
+
+  function handleProfileDropdownKeys(e) {
+    const key = e.key;
+    if (['ArrowUp','ArrowDown','Enter',' ','Escape','Tab'].includes(key)) e.preventDefault();
+    if (key === 'Escape') { closeProfileDropdown(); setNavFocus(8); return; }
+    const btns = getProfileDropdownBtns();
+    if      (key === 'ArrowDown') setProfileDropdownFocus(Math.min(profileFocusIdx + 1, btns.length - 1));
+    else if (key === 'ArrowUp')   setProfileDropdownFocus(Math.max(profileFocusIdx - 1, 0));
+    else if (key === 'Enter' || key === ' ') btns[profileFocusIdx]?.click();
+  }
+
   function handleOverlayKeys(e) {
     const key = e.key;
     if (key === 'Escape' || key === 'Backspace') {
@@ -583,26 +1145,21 @@
 
     if (key === 'ArrowDown') {
       if (sec === 'trailer') {
-        const chips = document.querySelectorAll('.provider-chip');
-        setOverlayFocus(chips.length ? 'providers' : 'actions', 0);
-      } else if (sec === 'providers') {
         setOverlayFocus('actions', 0);
+      } else if (sec === 'actions') {
+        const chips = document.querySelectorAll('.provider-chip');
+        if (chips.length) setOverlayFocus('providers', 0);
       }
     } else if (key === 'ArrowUp') {
       if (sec === 'actions') {
-        const chips = document.querySelectorAll('.provider-chip');
-        if (chips.length) setOverlayFocus('providers', 0);
-        else if (document.querySelector('.trailer-play-btn')) setOverlayFocus('trailer', 0);
+        if (document.querySelector('.trailer-play-btn')) setOverlayFocus('trailer', 0);
       } else if (sec === 'providers') {
-        const hasTrailer = document.querySelector('.trailer-play-btn');
-        setOverlayFocus(hasTrailer ? 'trailer' : 'actions', 0);
+        setOverlayFocus('actions', 0);
       }
     } else if (key === 'ArrowLeft') {
-      if (sec === 'actions' && col > 0) setOverlayFocus('actions', col - 1);
-      else if (sec === 'providers' && col > 0) setOverlayFocus('providers', col - 1);
+      if (sec === 'providers' && col > 0) setOverlayFocus('providers', col - 1);
     } else if (key === 'ArrowRight') {
-      if (sec === 'actions' && col < 1) setOverlayFocus('actions', col + 1);
-      else if (sec === 'providers') {
+      if (sec === 'providers') {
         const chips = document.querySelectorAll('.provider-chip');
         if (col < chips.length - 1) setOverlayFocus('providers', col + 1);
       }
@@ -621,9 +1178,7 @@
       // Button not rendered yet (async fetch pending) — silently wait
       if (!target) return;
     } else if (section === 'actions') {
-      target = col === 0
-        ? document.getElementById('hero-play')
-        : document.getElementById('hero-watchlist');
+      target = document.getElementById('hero-watchlist');
     } else if (section === 'providers') {
       const chips = [...document.querySelectorAll('.provider-chip')];
       state.overlayCol = Math.min(col, chips.length - 1);
@@ -638,10 +1193,10 @@
   function activateOverlayFocus() {
     const { overlaySection: s, overlayCol: c, overlayItem: item } = state;
     if (s === 'trailer') {
-      document.querySelector('.trailer-play-btn')?.click();
+      const link = document.querySelector('.trailer-play-btn');
+      if (link?.href) window.open(link.href, '_blank', 'noopener,noreferrer');
     } else if (s === 'actions') {
-      if (c === 0) showToast('\u25b6 Playing ' + (item?.title || ''));
-      else showToast('\u2713 Added to Watchlist');
+      document.getElementById('hero-watchlist')?.click();
     } else if (s === 'providers') {
       const chips = [...document.querySelectorAll('.provider-chip')];
       chips[c]?.click();
@@ -650,17 +1205,22 @@
 
   // ── Tab activation ─────────────────────────────────────
   // Show the loading screen for `ms` ms as a page transition effect.
-  // Guard: only fires after init (loader already has 'hidden' class).
   let _transitionTimer = null;
-  function showPageTransition(ms = 1500) {
+  function showPageTransition(ms = 1000) {
     const $loader = document.getElementById('loading-screen');
-    if (!$loader || !$loader.classList.contains('hidden')) return;
+    if (!$loader) return;
     clearTimeout(_transitionTimer);
     $loader.classList.remove('hidden');
     _transitionTimer = setTimeout(() => $loader.classList.add('hidden'), ms);
   }
 
-  function activateTab(idx) {
+  // Returns a promise that resolves after the loader has had time to fade in.
+  function startTransition(ms = 1000) {
+    showPageTransition(ms);
+    return new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  async function activateTab(idx) {
     const tab = NAV_TABS[idx];
     state.activeTab = tab;
     syncTabActive();
@@ -668,15 +1228,19 @@
     if (tab === 'search') {
       openSearchView();
     } else if (tab === 'home') {
-      showPageTransition();
+      await startTransition();
       closeSearchView();
+      closeLibraryView();
+      closeShopView();
       CONTENT = HOME_CONTENT;
       populateBanner();
       buildRows();
       setBannerFocus(0);
     } else if (tab === 'movies') {
-      showPageTransition();
+      await startTransition();
       closeSearchView();
+      closeLibraryView();
+      closeShopView();
       if (MOVIES_CONTENT) {
         CONTENT = MOVIES_CONTENT;
         populateBanner();
@@ -686,8 +1250,10 @@
         loadMoviesTabContent();
       }
     } else if (tab === 'shows') {
-      showPageTransition();
+      await startTransition();
       closeSearchView();
+      closeLibraryView();
+      closeShopView();
       if (SHOWS_CONTENT) {
         CONTENT = SHOWS_CONTENT;
         populateBanner();
@@ -696,10 +1262,101 @@
       } else {
         loadShowsTabContent();
       }
+    } else if (tab === 'library') {
+      await startTransition();
+      closeSearchView();
+      closeShopView();
+      openLibraryView();
+    } else if (tab === 'shop') {
+      await startTransition();
+      closeSearchView();
+      closeLibraryView();
+      openShopView();
     } else {
-      showPageTransition();
+      await startTransition();
       showToast('📺 ' + capitalise(tab));
       setBannerFocus(0);
+    }
+  }
+
+  function openLibraryView() {
+    document.getElementById('hero-banner').style.display  = 'none';
+    document.getElementById('content-area').style.display = 'none';
+    document.getElementById('library-view').classList.remove('hidden');
+    renderLibrary();
+  }
+
+  function closeLibraryView() {
+    document.getElementById('library-view').classList.add('hidden');
+    document.getElementById('hero-banner').style.display  = '';
+    document.getElementById('content-area').style.display = '';
+  }
+
+  function openShopView() {
+    document.getElementById('hero-banner').style.display  = 'none';
+    document.getElementById('content-area').style.display = 'none';
+    document.getElementById('shop-view').classList.remove('hidden');
+    document.getElementById('shop-empty').classList.add('visible');
+  }
+
+  function closeShopView() {
+    document.getElementById('shop-view').classList.add('hidden');
+    document.getElementById('hero-banner').style.display  = '';
+    document.getElementById('content-area').style.display = '';
+  }
+
+  async function renderLibrary() {
+    const $empty   = document.getElementById('library-empty');
+    const $grid    = document.getElementById('library-grid');
+    const $heading = document.getElementById('library-empty-heading');
+    const $sub     = document.getElementById('library-empty-sub');
+    const $loginBtn = document.getElementById('library-login-btn');
+
+    $grid.innerHTML = '';
+    $empty.classList.remove('visible');
+
+    if (!tmdbAuth.sessionId) {
+      $heading.textContent = "You're Not Logged In";
+      $sub.textContent     = 'Log in to TMDB to use Watchlist.';
+      $loginBtn.classList.remove('hidden');
+      $empty.classList.add('visible');
+      return;
+    }
+
+    $loginBtn.classList.add('hidden');
+
+    // Reload watchlist from TMDB to get full item details
+    try {
+      const [mv, tv] = await Promise.all([
+        tmdbAuthFetch(`/account/${tmdbAuth.accountId}/watchlist/movies`),
+        tmdbAuthFetch(`/account/${tmdbAuth.accountId}/watchlist/tv`),
+      ]);
+      const movies = (mv.results || []).map(m => toCard(m));
+      const shows  = (tv.results || []).map(t => toCard({ ...t, media_type: 'tv' }));
+      const all    = [...movies, ...shows];
+
+      // Refresh the in-memory set too
+      tmdbAuth.watchlist.clear();
+      movies.forEach(m => tmdbAuth.watchlist.add(`movie-${m.id}`));
+      shows.forEach(t  => tmdbAuth.watchlist.add(`tv-${t.id}`));
+
+      if (!all.length) {
+        $heading.textContent = "Nothing's here yet!";
+        $sub.textContent     = 'Add shows or movies to your Watchlist and they will appear here!';
+        $empty.classList.add('visible');
+        return;
+      }
+
+      all.forEach(item => {
+        const card = createCard(item, 0, 0, false);
+        // Override click to open overlay directly
+        card.addEventListener('click', () => openOverlay(item));
+        $grid.appendChild(card);
+      });
+    } catch(e) {
+      $heading.textContent = 'Could not load Watchlist';
+      $sub.textContent     = 'Please try again later.';
+      $empty.classList.add('visible');
     }
   }
 
@@ -1095,6 +1752,10 @@
     state.overlaySection = 'trailer';
     state.overlayCol     = 0;
 
+    // Update watchlist & rating UI immediately
+    updateWatchlistBtn(item);
+    updateStarsUI(item);
+
     // ── Fetch TMDB details ──
     const id        = item.id;
     const mediaType = item.mediaType;
@@ -1123,7 +1784,8 @@
         } else if (d.number_of_seasons) {
           runtime = d.number_of_seasons === 1 ? '1 Season' : `${d.number_of_seasons} Seasons`;
         }
-        $heroMeta.textContent = [year, type, rating, runtime].filter(Boolean).join('  \u00b7  ');
+        const genres = (d.genres || []).slice(0, 3).map(g => g.name).join(', ');
+        $heroMeta.textContent = [year, type, rating, runtime, genres].filter(Boolean).join('  \u00b7  ');
       }
 
       // Trailer
@@ -1365,20 +2027,60 @@
 
   function setupHeroOverlay() {
     $heroBack.addEventListener('click', closeOverlay);
-    $heroPlay.addEventListener('click', () => {
-      if (state.overlayItem) showToast('▶ Playing ' + state.overlayItem.title);
-    });
     $heroWatchlist.addEventListener('click', () => {
-      if (state.overlayItem) showToast('✓ Added to Watchlist');
+      if (state.overlayItem) tmdbToggleWatchlist(state.overlayItem);
+    });
+
+    // Rating stars
+    const stars = document.querySelectorAll('.star-btn');
+    stars.forEach(star => {
+      star.addEventListener('mouseenter', () => {
+        const v = parseInt(star.dataset.value);
+        stars.forEach(s => s.classList.toggle('hovered', parseInt(s.dataset.value) <= v));
+      });
+      star.addEventListener('mouseleave', () => {
+        stars.forEach(s => s.classList.remove('hovered'));
+      });
+      star.addEventListener('click', () => {
+        if (state.overlayItem) tmdbRateItem(state.overlayItem, parseInt(star.dataset.value));
+      });
+    });
+    document.getElementById('hero-rating-clear').addEventListener('click', () => {
+      if (state.overlayItem) tmdbRateItem(state.overlayItem, 0);
     });
 
     // Banner play/info buttons
     const $bp = document.getElementById('banner-play');
     const $bi = document.getElementById('banner-info');
-    $bp.addEventListener('click', (e) => { e.stopPropagation(); showToast('▶ Playing ' + CONTENT.heroes[carouselIndex].title); });
+    $bp.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const hero = CONTENT.heroes[carouselIndex];
+      if (!hero) return;
+      const mediaType = hero.mediaType || hero.media_type || 'movie';
+      // Open the window NOW (synchronously in the click handler) so browsers
+      // don't treat it as a blocked popup after the async fetch resolves.
+      const win = window.open('', '_blank');
+      if (!win) { showToast('Allow popups to watch the trailer'); return; }
+      try {
+        const data = await tmdbFetch(`/${mediaType}/${hero.id}/videos`);
+        const vids = data.results || [];
+        const trailer =
+          vids.find(v => v.type === 'Trailer' && v.site === 'YouTube') ||
+          vids.find(v => v.type === 'Teaser'  && v.site === 'YouTube') ||
+          vids.find(v => v.site === 'YouTube');
+        if (trailer) {
+          win.location.href = `https://www.youtube.com/watch?v=${trailer.key}`;
+        } else {
+          win.close();
+          showToast('No trailer available');
+        }
+      } catch {
+        win.close();
+        showToast('Could not load trailer');
+      }
+    });
     $bi.addEventListener('click', (e) => { e.stopPropagation(); openOverlayFromHero(); });
 
-    // Banner is one clickable block
     $bannerEl.addEventListener('click', (e) => {
       if (e.target.closest('.carousel-arrow') || e.target.closest('#carousel-dots')) return;
       openOverlayFromHero();
@@ -1405,7 +2107,19 @@
     settingsBtn.addEventListener('mouseenter', () => setNavFocus(7));
     settingsBtn.addEventListener('click',      () => openSettings());
     profileBtn.addEventListener('mouseenter',  () => setNavFocus(8));
-    profileBtn.addEventListener('click',       () => showToast('👤 Profile'));  }
+    profileBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleProfileDropdown(); });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#profile-wrap')) closeProfileDropdown();
+    });
+
+    document.getElementById('tmdb-login-btn').addEventListener('click', () => { closeProfileDropdown(); tmdbLogin(); });
+    document.getElementById('tmdb-logout-btn').addEventListener('click', tmdbLogout);
+    document.getElementById('tmdb-confirm-ok').addEventListener('click', tmdbConfirmLogin);
+    document.getElementById('tmdb-confirm-cancel').addEventListener('click', tmdbCancelLogin);
+    document.getElementById('library-login-btn').addEventListener('click', () => tmdbLogin());
+  }
 
   // ── Scroll handling ────────────────────────────────────
   function onScroll() {
